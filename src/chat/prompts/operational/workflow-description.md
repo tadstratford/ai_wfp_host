@@ -1,0 +1,1 @@
+Write a short 1-2 sentence description of what this workflow does, suitable for display in a workflow list. Focus on the business outcome, not the technical steps. Return only the description — no preamble, no labels, no markdown.

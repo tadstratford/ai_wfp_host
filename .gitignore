@@ -1,0 +1,39 @@
+.env
+.idea
+.DS_Store
+.old_files
+.vscode
+.db
+node_modules/
+dist
+drizzle
+node_modules
+sqlite.db
+/logs/
+.env.*
+!.env.example
+.agents/
+
+# Runtime data directory (local only)
+data/
+temp_*.db
+
+.vercel
+
+# Moat task system
+.moat/
+
+# Executables
+*.exe
+
+# Bun build cache
+*.bun-build
+
+# TypeScript incremental build cache
+tsconfig.tsbuildinfo
+
+# opencode agent tooling (local only)
+.opencode/
+
+# Docs (local only)
+docs/

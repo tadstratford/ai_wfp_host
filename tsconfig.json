@@ -1,0 +1,86 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+    "composite": true,
+    "strict": true,
+    "downlevelIteration": true,
+    "skipLibCheck": true,
+    "jsx": "react-jsx",
+    "jsxImportSource": "hono/jsx",
+    "allowSyntheticDefaultImports": true,
+    "forceConsistentCasingInFileNames": true,
+    "allowJs": true,
+    "types": ["bun-types"],
+    "paths": {
+      "@chat/*": ["./src/chat/*"],
+      "@capabilities/*": ["./src/capabilities/*"],
+      "@frontend/*": ["./src/ui/*"],
+      "@mcp/*": ["./src/mcp/*"],
+      "@server/*": ["./src/server/*"],
+      "@shared/*": ["./src/shared/*"],
+      "@workflow/*": ["./src/workflow/*"],
+      "@workspace/*": ["./src/workspace/*"],
+      "@ui/*": ["./src/ui/*"],
+      "@data": ["./src/data"],
+      "@data/*": ["./src/data/*"],
+
+      "wfp-api": ["./src/shared/wfp-api/index.ts"],
+      "wfp-api/types": ["./src/shared/wfp-api/types.ts"],
+
+      "wfp-format": ["./src/types"],
+      "wfp-format/*": ["./src/types/*"],
+
+      "@backend/types": ["./src/shared/types"],
+      "@backend/types/*": ["./src/shared/types/*"],
+      "@backend/utilities/*": ["./src/shared/utils/*"],
+      "@backend/interfaces/streaming/*": ["./src/server/streaming/*"],
+
+      "@backend/core/workflow": ["./src/workflow"],
+      "@backend/core/workflow/*": ["./src/workflow/*"],
+      "@backend/core/process_manager/*": ["./src/workflow/process_manager/*"],
+
+      "@backend/core/wfp": ["./src/workspace/wfp"],
+      "@backend/core/wfp/*": ["./src/workspace/wfp/*"],
+      "@backend/core/workspace/*": ["./src/workspace/*"],
+      "@backend/core/session": ["./src/workspace/session"],
+      "@backend/core/session/*": ["./src/workspace/session/*"],
+      "@backend/core/settings/*": ["./src/workspace/settings/*"],
+      "@backend/core/knowledge/*": ["./src/workspace/knowledge/*"],
+      "@backend/core/user-data/*": ["./src/data/*"],
+      "@backend/core/context": ["./src/workspace/context"],
+      "@backend/core/context/*": ["./src/workspace/context/*"],
+      "@backend/core/email": ["./src/shared/email"],
+      "@backend/core/email/*": ["./src/shared/email/*"],
+      "@backend/core/dashboard/*": ["./src/workspace/dashboard/*"],
+      "@backend/core/overview/*": ["./src/workspace/overview/*"],
+
+      "@backend/core/llm": ["./src/shared/llm"],
+      "@backend/core/llm/*": ["./src/shared/llm/*"],
+      "@backend/core/models/*": ["./src/shared/llm/*"],
+      "@backend/core/logging/*": ["./src/shared/logging/*"],
+      "@backend/core/crypto": ["./src/shared/crypto"],
+      "@backend/core/crypto/*": ["./src/shared/crypto/*"],
+
+      "@backend/core/admin/*": ["./src/server/admin/*"],
+      "@backend/core/auth/*": ["./src/server/auth/*"],
+      "@backend/core/forms/*": ["./src/server/forms/*"],
+      "@backend/core/user": ["./src/server/user"],
+      "@backend/core/user/*": ["./src/server/user/*"],
+      "@backend/core/apps/*": ["./src/server/apps/*"],
+
+      "@backend/core/chat/*": ["./src/chat/*"],
+
+      "@core/*": ["./src/core/*"],
+      "@rules/*": ["./src/rules/*"],
+      "@backend/*": ["./src/*"],
+      "backend/*": ["./src/*"]
+    }
+  },
+  "include": ["**/*.ts", "**/*.tsx"],
+  "exclude": ["node_modules"]
+}

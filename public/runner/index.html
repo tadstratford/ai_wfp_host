@@ -1,0 +1,663 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>WFP Runner</title>
+<style>
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 14px; color: #1f2937; background: #f9fafb; }
+body { display: flex; flex-direction: column; height: 100vh; }
+
+.topbar { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; background: #fff; border-bottom: 1px solid #e5e7eb; }
+.topbar-left { display: flex; align-items: center; gap: 12px; }
+.brand { color: #111827; }
+.workspace-name { color: #4b5563; }
+.file-name { color: #9ca3af; font-size: 12px; }
+.topbar-right { display: flex; align-items: center; gap: 8px; }
+
+button { font-family: inherit; font-size: 13px; padding: 6px 12px; border: 1px solid #d1d5db; background: #fff; color: #111827; border-radius: 4px; cursor: pointer; }
+button:hover:not(:disabled) { background: #f3f4f6; }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+button.primary, #btn-cfg-save { background: #2563eb; color: #fff; border-color: #2563eb; }
+button.primary:hover, #btn-cfg-save:hover { background: #1d4ed8; }
+button.secondary { background: #fff; }
+button.link { background: none; border: none; padding: 0; color: #2563eb; cursor: pointer; font-size: 12px; }
+button.run { padding: 2px 8px; font-size: 11px; }
+
+.layout { display: grid; grid-template-columns: 280px 1fr; flex: 1; overflow: hidden; }
+
+.sidebar { padding: 12px 16px; background: #fff; border-right: 1px solid #e5e7eb; overflow-y: auto; }
+.sidebar section { margin-bottom: 18px; }
+.sidebar h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: #6b7280; margin: 0 0 6px 0; font-weight: 600; }
+.section-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 6px; }
+.section-head h3 { margin: 0; }
+.add-btn { font-size: 11px; color: #2563eb; background: none; border: none; padding: 0; cursor: pointer; font-family: inherit; }
+.add-btn:hover:not(:disabled) { text-decoration: underline; }
+.add-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.hidden-row { display: none; }
+.hidden { display: none !important; }
+
+.list { list-style: none; padding: 0; margin: 0; }
+.list li { padding: 4px 0; display: flex; align-items: center; justify-content: space-between; gap: 6px; border-bottom: 1px solid #f3f4f6; flex-wrap: wrap; }
+.list li:last-child { border-bottom: none; }
+.list li .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.list li .name.clickable { cursor: pointer; }
+.list li .name.clickable:hover { color: #2563eb; text-decoration: underline; }
+.list li .meta { color: #9ca3af; font-size: 11px; }
+.list li.empty { color: #9ca3af; font-style: italic; padding: 8px 0; border: none; }
+.voice-tag { display: inline-block; font-size: 11px; color: #2563eb; margin-left: 4px; }
+
+.output { display: flex; flex-direction: column; overflow: hidden; }
+.output-header { padding: 10px 16px; background: #fff; border-bottom: 1px solid #e5e7eb; display: flex; justify-content: space-between; align-items: center; }
+.output-header h3 { margin: 0; font-size: 14px; }
+.log { flex: 1; overflow-y: auto; padding: 12px 16px; }
+.log .placeholder { color: #9ca3af; font-style: italic; }
+
+.log-entry { margin-bottom: 12px; padding: 8px 12px; background: #fff; border: 1px solid #e5e7eb; border-radius: 4px; }
+.log-entry.system { background: #eff6ff; border-color: #bfdbfe; }
+.log-entry.error { background: #fef2f2; border-color: #fecaca; }
+.log-entry.voice { background: #ecfeff; border-color: #a5f3fc; }
+.log-entry.user { background: #fefce8; border-color: #fde68a; }
+.log-entry .head { display: flex; gap: 8px; align-items: baseline; margin-bottom: 4px; }
+.log-entry .head .label { font-weight: 600; font-size: 12px; color: #374151; }
+.log-entry .head .source { color: #9ca3af; font-size: 11px; }
+.log-entry .head .time { color: #9ca3af; font-size: 11px; margin-left: auto; }
+.log-divider {
+  text-align: center; font-size: 11px; color: #9ca3af;
+  text-transform: uppercase; letter-spacing: 0.05em;
+  margin: 14px 0 10px 0; padding: 5px 0;
+  border-top: 1px dashed #e5e7eb; border-bottom: 1px dashed #e5e7eb;
+  background: #f9fafb;
+}
+.log-entry .body { word-break: break-word; }
+.log-entry .body pre { white-space: pre-wrap; word-break: break-word; background: #f9fafb; padding: 8px; border-radius: 3px; font-size: 12px; margin: 0; }
+.log-entry .body h1, .log-entry .body h2, .log-entry .body h3, .log-entry .body h4 { margin: 8px 0 4px 0; font-weight: 600; }
+.log-entry .body h1 { font-size: 16px; }
+.log-entry .body h2 { font-size: 15px; }
+.log-entry .body h3, .log-entry .body h4 { font-size: 14px; }
+.log-entry .body p { margin: 6px 0; }
+.log-entry .body ul, .log-entry .body ol { margin: 6px 0; padding-left: 20px; }
+.log-entry .body li { margin: 2px 0; }
+.log-entry .body table { border-collapse: collapse; margin: 8px 0; font-size: 12px; }
+.log-entry .body th, .log-entry .body td { border: 1px solid #e5e7eb; padding: 4px 8px; text-align: left; }
+.log-entry .body th { background: #f3f4f6; font-weight: 600; }
+.log-entry .body code { background: #f3f4f6; padding: 1px 4px; border-radius: 3px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; }
+.log-entry .body strong { font-weight: 600; }
+.log-entry .body em { font-style: italic; }
+.voice-line { font-size: 15px; }
+.voice-line .voice-icon { margin-right: 6px; }
+
+.report-actions { display: flex; gap: 8px; margin-top: 4px; }
+.btn-action { display: inline-block; padding: 6px 14px; border-radius: 4px; font-size: 13px; text-decoration: none; cursor: pointer; }
+.btn-action.primary { background: #2563eb; color: #fff; }
+.btn-action.primary:hover { background: #1d4ed8; }
+.btn-action.secondary { background: #fff; color: #2563eb; border: 1px solid #2563eb; }
+.btn-action.secondary:hover { background: #eff6ff; }
+
+/* Mic widget â€” toggle for voice loop */
+#mic-widget {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid #d1d5db; border-radius: 999px;
+  background: #fff; cursor: pointer; user-select: none;
+  font-size: 12px; color: #374151;
+  margin-right: 4px;
+}
+#mic-widget:hover:not(.unsupported) { background: #f3f4f6; }
+#mic-widget .mic-dot {
+  width: 22px; height: 22px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%; background: #9ca3af; color: #fff;
+}
+#mic-widget[data-state="off"] .mic-dot { background: #9ca3af; }
+#mic-widget[data-state="idle"] .mic-dot { background: #6b7280; }
+#mic-widget[data-state="wake"] .mic-dot { background: #2563eb; animation: pulse 1s infinite; }
+#mic-widget[data-state="processing"] .mic-dot { background: #f59e0b; animation: spin 1s linear infinite; }
+#mic-widget[data-state="speaking"] .mic-dot { background: #10b981; animation: pulse 0.7s infinite; }
+#mic-widget[data-state="error"] .mic-dot { background: #ef4444; }
+#mic-widget.unsupported { opacity: 0.4; cursor: not-allowed; }
+
+@keyframes pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.15); }
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Modals */
+.modal { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 100; }
+.modal.hidden { display: none; }
+.modal-panel { background: #fff; padding: 20px 24px; border-radius: 6px; width: 440px; max-width: 90vw; }
+.modal-panel-wide { width: 800px; max-width: 95vw; }
+.data-textarea { width: 100%; height: 50vh; font-family: ui-monospace, "Cascadia Code", Menlo, Consolas, monospace; font-size: 12px; padding: 8px; border: 1px solid #d1d5db; border-radius: 3px; resize: vertical; }
+.text-area-short { width: 100%; height: 70px; padding: 6px 8px; border: 1px solid #d1d5db; border-radius: 3px; font-size: 13px; font-family: inherit; resize: vertical; }
+.ai-hint { font-size: 11px; color: #6b7280; margin: 8px 0 0 0; line-height: 1.5; }
+.shared-warning { background: #fef3c7; border: 1px solid #fde68a; padding: 8px 12px; border-radius: 4px; font-size: 12px; color: #78350f; margin-bottom: 10px; }
+.shared-warning.hidden { display: none; }
+.shared-warning ul { margin: 4px 0 0 0; padding-left: 18px; }
+.shared-warning li { margin: 1px 0; }
+button.danger { color: #b91c1c; border-color: #fca5a5; }
+button.danger:hover:not(:disabled) { background: #fef2f2; }
+.modal-panel h2 { margin: 0 0 6px 0; font-size: 16px; }
+.modal-panel h3.section-title { margin: 14px 0 6px 0; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: #6b7280; font-weight: 600; }
+.modal-panel p.muted { color: #6b7280; font-size: 12px; margin: 0 0 14px 0; }
+.modal-panel label { display: block; font-size: 12px; color: #374151; margin-bottom: 10px; }
+.modal-panel input, .modal-panel select { display: block; width: 100%; margin-top: 3px; padding: 6px 8px; border: 1px solid #d1d5db; border-radius: 3px; font-size: 13px; font-family: inherit; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-left">
+    <strong class="brand">WFP Runner</strong>
+    <span id="workspace-name" class="workspace-name">No file open</span>
+    <span id="file-name" class="file-name"></span>
+  </div>
+  <div class="topbar-right">
+    <div id="mic-widget" class="hidden" data-state="off" title="Voice loop">
+      <div class="mic-dot">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+          <path d="M12 1a4 4 0 0 1 4 4v6a4 4 0 0 1-8 0V5a4 4 0 0 1 4-4zm0 2a2 2 0 0 0-2 2v6a2 2 0 0 0 4 0V5a2 2 0 0 0-2-2zm6.25 8A6.25 6.25 0 0 1 6 18.9V21H4v-2.1A8.25 8.25 0 0 1 5.75 11h2.6A6.25 6.25 0 0 0 12 17.25 6.25 6.25 0 0 0 18.25 11h-2Z"/>
+        </svg>
+      </div>
+      <span id="mic-label">Voice off</span>
+    </div>
+    <button id="btn-new-workspace">New Workspace</button>
+    <button id="btn-open">Open .wfp</button>
+    <button id="btn-save" disabled>Save</button>
+    <button id="btn-settings">Settings</button>
+  </div>
+</header>
+
+<main class="layout">
+  <aside class="sidebar">
+    <section>
+      <div class="section-head">
+        <h3>Workflows</h3>
+        <button id="btn-new-workflow" class="add-btn" type="button" disabled>+ Add</button>
+      </div>
+      <ul id="workflow-list" class="list"><li class="empty">Open a .wfp file or start a new workspace.</li></ul>
+    </section>
+    <section>
+      <div class="section-head">
+        <h3>Data Files</h3>
+        <button id="btn-add-data" class="add-btn" type="button" disabled>+ Add</button>
+      </div>
+      <ul id="data-list" class="list"></ul>
+    </section>
+    <section>
+      <div class="section-head">
+        <h3>Knowledge Packs</h3>
+        <button id="btn-add-pack" class="add-btn" type="button" disabled>+ Add</button>
+      </div>
+      <ul id="knowledge-list" class="list"></ul>
+    </section>
+  </aside>
+
+  <section class="output">
+    <div class="output-header">
+      <h3 id="output-title">Output</h3>
+      <button id="btn-clear-log" class="link">Clear log</button>
+    </div>
+    <div id="log" class="log">
+      <div class="placeholder">Workflow output will appear here.</div>
+    </div>
+  </section>
+</main>
+
+<!-- Modify with AI modal -->
+<div id="modify-modal" class="modal hidden">
+  <div class="modal-panel modal-panel-wide">
+    <h2 id="modify-modal-title">Modify workflow</h2>
+    <p class="muted">
+      1) Describe what you want changed. 2) Click <b>Copy Prompt</b>, paste into Claude / Gemini / ChatGPT.
+      3) Paste their response back and click <b>Apply</b>. The response must be a JSON block â€” instructions are included in the prompt.
+    </p>
+    <div id="modify-shared-warning" class="shared-warning hidden"></div>
+    <label>What would you like to change?
+      <textarea id="modify-request" class="text-area-short" spellcheck="false" placeholder="e.g. Add a column to the balance sheet showing % of total assets"></textarea>
+    </label>
+    <div class="modal-actions" style="margin-top: 8px; margin-bottom: 8px;">
+      <button id="btn-modify-copy">Copy Prompt</button>
+      <span id="modify-copy-status" class="muted" style="align-self: center;"></span>
+    </div>
+    <label>Paste the AI's response
+      <textarea id="modify-response" class="data-textarea" spellcheck="false" placeholder="Paste the AI response (entire ```json { ... } ``` block)"></textarea>
+    </label>
+    <div class="modal-actions">
+      <button id="btn-modify-delete" class="secondary danger hidden-row">Delete workflow</button>
+      <span id="modify-apply-status" class="muted" style="align-self: center;"></span>
+      <span style="flex:1"></span>
+      <button id="btn-modify-cancel" class="secondary">Close</button>
+      <button id="btn-modify-apply">Apply</button>
+      <button id="btn-modify-save">Save to Disk</button>
+    </div>
+  </div>
+</div>
+
+<!-- Tool editor modal -->
+<div id="tool-modal" class="modal hidden">
+  <div class="modal-panel modal-panel-wide">
+    <h2 id="tool-modal-title">Edit tool</h2>
+    <label>Name
+      <input id="tool-modal-name" type="text" />
+    </label>
+    <label>Description
+      <textarea id="tool-modal-description" class="text-area-short" spellcheck="false"></textarea>
+    </label>
+    <label>Code (JavaScript function body)
+      <textarea id="tool-modal-code" class="data-textarea" spellcheck="false"></textarea>
+    </label>
+    <p class="muted ai-hint">
+      Use AI to edit this tool: click <b>Copy Prompt for AI</b>, paste into Claude / Gemini / ChatGPT,
+      add your change request, then paste their updated <b>Description</b> and <b>Code</b> back into the fields above.
+    </p>
+    <div class="modal-actions">
+      <button id="btn-tool-delete" class="secondary danger">Delete</button>
+      <button id="btn-tool-copy-prompt" class="secondary">Copy Prompt for AI</button>
+      <span id="tool-copy-status" class="muted" style="align-self: center;"></span>
+      <span style="flex:1"></span>
+      <button id="btn-tool-cancel" class="secondary">Cancel</button>
+      <button id="btn-tool-save">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Data editor modal -->
+<div id="data-modal" class="modal hidden">
+  <div class="modal-panel modal-panel-wide">
+    <h2 id="data-modal-title">Edit data file</h2>
+    <p class="muted" id="data-modal-meta"></p>
+    <label id="data-modal-name-row" class="hidden-row">Name (lowercase, letters/digits/underscores)
+      <input id="data-modal-name" type="text" placeholder="e.g. medications" />
+    </label>
+    <label id="data-modal-type-row" class="hidden-row">Type
+      <select id="data-modal-type">
+        <option value="csv">CSV â€” rows with columns</option>
+        <option value="json_array">JSON array â€” array of objects</option>
+        <option value="json_object">JSON object</option>
+        <option value="text">Plain text</option>
+      </select>
+    </label>
+    <textarea id="data-modal-textarea" class="data-textarea" spellcheck="false"></textarea>
+    <div class="modal-actions">
+      <button id="btn-data-delete" class="secondary danger hidden-row">Delete</button>
+      <button id="btn-data-replace" class="secondary">Replace from file...</button>
+      <span style="flex:1"></span>
+      <button id="btn-data-cancel" class="secondary">Cancel</button>
+      <button id="btn-data-save">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Knowledge pack editor modal -->
+<div id="pack-modal" class="modal hidden">
+  <div class="modal-panel modal-panel-wide">
+    <h2 id="pack-modal-title">Edit knowledge pack</h2>
+    <label>Name
+      <input id="pack-modal-name" type="text" placeholder="e.g. caregiver-system" />
+    </label>
+    <label>Scope
+      <input id="pack-modal-scope" type="text" placeholder="workflow | chat | chat+workflow | privacy-map" />
+    </label>
+    <label>Tags (comma-separated)
+      <input id="pack-modal-tags" type="text" placeholder="caregiver, voice" />
+    </label>
+    <label>Content (markdown)
+      <textarea id="pack-modal-content" class="data-textarea" spellcheck="false"></textarea>
+    </label>
+    <div class="modal-actions">
+      <button id="btn-pack-delete" class="secondary danger hidden-row">Delete</button>
+      <span style="flex:1"></span>
+      <button id="btn-pack-cancel" class="secondary">Cancel</button>
+      <button id="btn-pack-save">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Pause-for-input modal -->
+<div id="pause-modal" class="modal hidden">
+  <div class="modal-panel">
+    <h2>Workflow paused â€” input needed</h2>
+    <div id="pause-prompt" class="muted"></div>
+    <div id="pause-form-fields"></div>
+    <label id="pause-text-wrap">Your response
+      <textarea id="pause-input" class="text-area-short" spellcheck="false" placeholder="Type your response..."></textarea>
+    </label>
+    <div id="pause-validation" class="muted" style="color:#b91c1c;"></div>
+    <div class="modal-actions">
+      <span style="flex:1"></span>
+      <button id="btn-pause-cancel" class="secondary">Cancel</button>
+      <button id="btn-pause-continue">Continue</button>
+    </div>
+  </div>
+</div>
+
+<!-- Save modal -->
+<div id="save-modal" class="modal hidden">
+  <div class="modal-panel">
+    <h2>Save workspace</h2>
+    <p class="muted">Edit the workspace name and file name, then choose a format.</p>
+    <label>Workspace name (saved into the file's metadata)
+      <input id="save-workspace" type="text" placeholder="My Workflow" />
+    </label>
+    <label>File name (extension added automatically)
+      <input id="save-filename" type="text" placeholder="my_workflow" />
+    </label>
+    <label>Format
+      <select id="save-format">
+        <option value="wfp">.wfp â€” workflow process file</option>
+        <option value="html">.wfp.html â€” HTML wrapper (best for sharing)</option>
+      </select>
+    </label>
+    <div class="modal-actions">
+      <span style="flex:1"></span>
+      <button id="btn-save-cancel" class="secondary">Cancel</button>
+      <button id="btn-save-confirm">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Settings modal -->
+<div id="settings-modal" class="modal hidden">
+  <div class="modal-panel">
+    <h2>Settings</h2>
+    <p class="muted">LLM settings live in your browser. Voice settings live in the open <code>.wfp</code>.</p>
+    <h3 class="section-title">LLM</h3>
+    <label>Base URL
+      <input id="cfg-base-url" type="text" placeholder="https://api.openai.com/v1" />
+    </label>
+    <label>API Key
+      <input id="cfg-api-key" type="password" placeholder="sk-..." />
+    </label>
+    <label>Model
+      <input id="cfg-model" type="text" placeholder="gpt-4o-mini" />
+    </label>
+    <label>Provider label (optional)
+      <input id="cfg-provider-label" type="text" placeholder="OpenAI" />
+    </label>
+    <h3 class="section-title">Voice (saved in .wfp)</h3>
+    <label>Voice workflow
+      <select id="cfg-voice-workflow"></select>
+    </label>
+    <label>Wake word
+      <input id="cfg-wake-word" type="text" placeholder="computer" />
+    </label>
+    <label>TTS voice
+      <select id="cfg-tts-voice"></select>
+    </label>
+    <div class="modal-actions">
+      <button id="btn-cfg-clear" class="secondary">Clear LLM</button>
+      <button id="btn-cfg-cancel" class="secondary">Cancel</button>
+      <button id="btn-cfg-save">Save</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/**
+ * marked v16.4.2 - a markdown parser
+ * Copyright (c) 2018-2025, MarkedJS. (MIT License)
+ * Copyright (c) 2011-2018, Christopher Jeffrey. (MIT License)
+ * https://github.com/markedjs/marked
+ */
+
+/**
+ * DO NOT EDIT THIS FILE
+ * The code in this file is generated from files in ./src/
+ */
+(function(g,f){if(typeof exports=="object"&&typeof module<"u"){module.exports=f()}else if("function"==typeof define && define.amd){define("marked",f)}else {g["marked"]=f()}}(typeof globalThis < "u" ? globalThis : typeof self < "u" ? self : this,function(){var exports={};var __exports=exports;var module={exports};
+"use strict";var G=Object.defineProperty;var Re=Object.getOwnPropertyDescriptor;var Te=Object.getOwnPropertyNames;var Oe=Object.prototype.hasOwnProperty;var we=(l,e)=>{for(var t in e)G(l,t,{get:e[t],enumerable:!0})},ye=(l,e,t,n)=>{if(e&&typeof e=="object"||typeof e=="function")for(let r of Te(e))!Oe.call(l,r)&&r!==t&&G(l,r,{get:()=>e[r],enumerable:!(n=Re(e,r))||n.enumerable});return l};var Pe=l=>ye(G({},"__esModule",{value:!0}),l);var gt={};we(gt,{Hooks:()=>S,Lexer:()=>x,Marked:()=>A,Parser:()=>b,Renderer:()=>P,TextRenderer:()=>$,Tokenizer:()=>y,defaults:()=>T,getDefaults:()=>_,lexer:()=>kt,marked:()=>k,options:()=>at,parse:()=>ht,parseInline:()=>ct,parser:()=>dt,setOptions:()=>lt,use:()=>ut,walkTokens:()=>pt});module.exports=Pe(gt);function _(){return{async:!1,breaks:!1,extensions:null,gfm:!0,hooks:null,pedantic:!1,renderer:null,silent:!1,tokenizer:null,walkTokens:null}}var T=_();function N(l){T=l}var I={exec:()=>null};function d(l,e=""){let t=typeof l=="string"?l:l.source,n={replace:(r,i)=>{let s=typeof i=="string"?i:i.source;return s=s.replace(m.caret,"$1"),t=t.replace(r,s),n},getRegex:()=>new RegExp(t,e)};return n}var Se=(()=>{try{return!!new RegExp("(?<=1)(?<!1)")}catch{return!1}})(),m={codeRemoveIndent:/^(?: {1,4}| {0,3}\t)/gm,outputLinkReplace:/\\([\[\]])/g,indentCodeCompensation:/^(\s+)(?:```)/,beginningSpace:/^\s+/,endingHash:/#$/,startingSpaceChar:/^ /,endingSpaceChar:/ $/,nonSpaceChar:/[^ ]/,newLineCharGlobal:/\n/g,tabCharGlobal:/\t/g,multipleSpaceGlobal:/\s+/g,blankLine:/^[ \t]*$/,doubleBlankLine:/\n[ \t]*\n[ \t]*$/,blockquoteStart:/^ {0,3}>/,blockquoteSetextReplace:/\n {0,3}((?:=+|-+) *)(?=\n|$)/g,blockquoteSetextReplace2:/^ {0,3}>[ \t]?/gm,listReplaceTabs:/^\t+/,listReplaceNesting:/^ {1,4}(?=( {4})*[^ ])/g,listIsTask:/^\[[ xX]\] /,listReplaceTask:/^\[[ xX]\] +/,anyLine:/\n.*\n/,hrefBrackets:/^<(.*)>$/,tableDelimiter:/[:|]/,tableAlignChars:/^\||\| *$/g,tableRowBlankLine:/\n[ \t]*$/,tableAlignRight:/^ *-+: *$/,tableAlignCenter:/^ *:-+: *$/,tableAlignLeft:/^ *:-+ *$/,startATag:/^<a /i,endATag:/^<\/a>/i,startPreScriptTag:/^<(pre|code|kbd|script)(\s|>)/i,endPreScriptTag:/^<\/(pre|code|kbd|script)(\s|>)/i,startAngleBracket:/^</,endAngleBracket:/>$/,pedanticHrefTitle:/^([^'"]*[^\s])\s+(['"])(.*)\2/,unicodeAlphaNumeric:/[\p{L}\p{N}]/u,escapeTest:/[&<>"']/,escapeReplace:/[&<>"']/g,escapeTestNoEncode:/[<>"']|&(?!(#\d{1,7}|#[Xx][a-fA-F0-9]{1,6}|\w+);)/,escapeReplaceNoEncode:/[<>"']|&(?!(#\d{1,7}|#[Xx][a-fA-F0-9]{1,6}|\w+);)/g,unescapeTest:/&(#(?:\d+)|(?:#x[0-9A-Fa-f]+)|(?:\w+));?/ig,caret:/(^|[^\[])\^/g,percentDecode:/%25/g,findPipe:/\|/g,splitPipe:/ \|/,slashPipe:/\\\|/g,carriageReturn:/\r\n|\r/g,spaceLine:/^ +$/gm,notSpaceStart:/^\S*/,endingNewline:/\n$/,listItemRegex:l=>new RegExp(`^( {0,3}${l})((?:[	 ][^\\n]*)?(?:\\n|$))`),nextBulletRegex:l=>new RegExp(`^ {0,${Math.min(3,l-1)}}(?:[*+-]|\\d{1,9}[.)])((?:[ 	][^\\n]*)?(?:\\n|$))`),hrRegex:l=>new RegExp(`^ {0,${Math.min(3,l-1)}}((?:- *){3,}|(?:_ *){3,}|(?:\\* *){3,})(?:\\n+|$)`),fencesBeginRegex:l=>new RegExp(`^ {0,${Math.min(3,l-1)}}(?:\`\`\`|~~~)`),headingBeginRegex:l=>new RegExp(`^ {0,${Math.min(3,l-1)}}#`),htmlBeginRegex:l=>new RegExp(`^ {0,${Math.min(3,l-1)}}<(?:[a-z].*>|!--)`,"i")},$e=/^(?:[ \t]*(?:\n|$))+/,_e=/^((?: {4}| {0,3}\t)[^\n]+(?:\n(?:[ \t]*(?:\n|$))*)?)+/,Le=/^ {0,3}(`{3,}(?=[^`\n]*(?:\n|$))|~{3,})([^\n]*)(?:\n|$)(?:|([\s\S]*?)(?:\n|$))(?: {0,3}\1[~`]* *(?=\n|$)|$)/,C=/^ {0,3}((?:-[\t ]*){3,}|(?:_[ \t]*){3,}|(?:\*[ \t]*){3,})(?:\n+|$)/,Me=/^ {0,3}(#{1,6})(?=\s|$)(.*)(?:\n+|$)/,j=/(?:[*+-]|\d{1,9}[.)])/,oe=/^(?!bull |blockCode|fences|blockquote|heading|html|table)((?:.|\n(?!\s*?\n|bull |blockCode|fences|blockquote|heading|html|table))+?)\n {0,3}(=+|-+) *(?:\n+|$)/,ae=d(oe).replace(/bull/g,j).replace(/blockCode/g,/(?: {4}| {0,3}\t)/).replace(/fences/g,/ {0,3}(?:`{3,}|~{3,})/).replace(/blockquote/g,/ {0,3}>/).replace(/heading/g,/ {0,3}#{1,6}/).replace(/html/g,/ {0,3}<[^\n>]+>\n/).replace(/\|table/g,"").getRegex(),ze=d(oe).replace(/bull/g,j).replace(/blockCode/g,/(?: {4}| {0,3}\t)/).replace(/fences/g,/ {0,3}(?:`{3,}|~{3,})/).replace(/blockquote/g,/ {0,3}>/).replace(/heading/g,/ {0,3}#{1,6}/).replace(/html/g,/ {0,3}<[^\n>]+>\n/).replace(/table/g,/ {0,3}\|?(?:[:\- ]*\|)+[\:\- ]*\n/).getRegex(),Q=/^([^\n]+(?:\n(?!hr|heading|lheading|blockquote|fences|list|html|table| +\n)[^\n]+)*)/,Ae=/^[^\n]+/,U=/(?!\s*\])(?:\\[\s\S]|[^\[\]\\])+/,Ee=d(/^ {0,3}\[(label)\]: *(?:\n[ \t]*)?([^<\s][^\s]*|<.*?>)(?:(?: +(?:\n[ \t]*)?| *\n[ \t]*)(title))? *(?:\n+|$)/).replace("label",U).replace("title",/(?:"(?:\\"?|[^"\\])*"|'[^'\n]*(?:\n[^'\n]+)*\n?'|\([^()]*\))/).getRegex(),Ie=d(/^( {0,3}bull)([ \t][^\n]+?)?(?:\n|$)/).replace(/bull/g,j).getRegex(),v="address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|meta|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul",K=/<!--(?:-?>|[\s\S]*?(?:-->|$))/,Ce=d("^ {0,3}(?:<(script|pre|style|textarea)[\\s>][\\s\\S]*?(?:</\\1>[^\\n]*\\n+|$)|comment[^\\n]*(\\n+|$)|<\\?[\\s\\S]*?(?:\\?>\\n*|$)|<![A-Z][\\s\\S]*?(?:>\\n*|$)|<!\\[CDATA\\[[\\s\\S]*?(?:\\]\\]>\\n*|$)|</?(tag)(?: +|\\n|/?>)[\\s\\S]*?(?:(?:\\n[ 	]*)+\\n|$)|<(?!script|pre|style|textarea)([a-z][\\w-]*)(?:attribute)*? */?>(?=[ \\t]*(?:\\n|$))[\\s\\S]*?(?:(?:\\n[ 	]*)+\\n|$)|</(?!script|pre|style|textarea)[a-z][\\w-]*\\s*>(?=[ \\t]*(?:\\n|$))[\\s\\S]*?(?:(?:\\n[ 	]*)+\\n|$))","i").replace("comment",K).replace("tag",v).replace("attribute",/ +[a-zA-Z:_][\w.:-]*(?: *= *"[^"\n]*"| *= *'[^'\n]*'| *= *[^\s"'=<>`]+)?/).getRegex(),le=d(Q).replace("hr",C).replace("heading"," {0,3}#{1,6}(?:\\s|$)").replace("|lheading","").replace("|table","").replace("blockquote"," {0,3}>").replace("fences"," {0,3}(?:`{3,}(?=[^`\\n]*\\n)|~{3,})[^\\n]*\\n").replace("list"," {0,3}(?:[*+-]|1[.)]) ").replace("html","</?(?:tag)(?: +|\\n|/?>)|<(?:script|pre|style|textarea|!--)").replace("tag",v).getRegex(),Be=d(/^( {0,3}> ?(paragraph|[^\n]*)(?:\n|$))+/).replace("paragraph",le).getRegex(),W={blockquote:Be,code:_e,def:Ee,fences:Le,heading:Me,hr:C,html:Ce,lheading:ae,list:Ie,newline:$e,paragraph:le,table:I,text:Ae},se=d("^ *([^\\n ].*)\\n {0,3}((?:\\| *)?:?-+:? *(?:\\| *:?-+:? *)*(?:\\| *)?)(?:\\n((?:(?! *\\n|hr|heading|blockquote|code|fences|list|html).*(?:\\n|$))*)\\n*|$)").replace("hr",C).replace("heading"," {0,3}#{1,6}(?:\\s|$)").replace("blockquote"," {0,3}>").replace("code","(?: {4}| {0,3}	)[^\\n]").replace("fences"," {0,3}(?:`{3,}(?=[^`\\n]*\\n)|~{3,})[^\\n]*\\n").replace("list"," {0,3}(?:[*+-]|1[.)]) ").replace("html","</?(?:tag)(?: +|\\n|/?>)|<(?:script|pre|style|textarea|!--)").replace("tag",v).getRegex(),qe={...W,lheading:ze,table:se,paragraph:d(Q).replace("hr",C).replace("heading"," {0,3}#{1,6}(?:\\s|$)").replace("|lheading","").replace("table",se).replace("blockquote"," {0,3}>").replace("fences"," {0,3}(?:`{3,}(?=[^`\\n]*\\n)|~{3,})[^\\n]*\\n").replace("list"," {0,3}(?:[*+-]|1[.)]) ").replace("html","</?(?:tag)(?: +|\\n|/?>)|<(?:script|pre|style|textarea|!--)").replace("tag",v).getRegex()},ve={...W,html:d(`^ *(?:comment *(?:\\n|\\s*$)|<(tag)[\\s\\S]+?</\\1> *(?:\\n{2,}|\\s*$)|<tag(?:"[^"]*"|'[^']*'|\\s[^'"/>\\s]*)*?/?> *(?:\\n{2,}|\\s*$))`).replace("comment",K).replace(/tag/g,"(?!(?:a|em|strong|small|s|cite|q|dfn|abbr|data|time|code|var|samp|kbd|sub|sup|i|b|u|mark|ruby|rt|rp|bdi|bdo|span|br|wbr|ins|del|img)\\b)\\w+(?!:|[^\\w\\s@]*@)\\b").getRegex(),def:/^ *\[([^\]]+)\]: *<?([^\s>]+)>?(?: +(["(][^\n]+[")]))? *(?:\n+|$)/,heading:/^(#{1,6})(.*)(?:\n+|$)/,fences:I,lheading:/^(.+?)\n {0,3}(=+|-+) *(?:\n+|$)/,paragraph:d(Q).replace("hr",C).replace("heading",` *#{1,6} *[^
+]`).replace("lheading",ae).replace("|table","").replace("blockquote"," {0,3}>").replace("|fences","").replace("|list","").replace("|html","").replace("|tag","").getRegex()},De=/^\\([!"#$%&'()*+,\-./:;<=>?@\[\]\\^_`{|}~])/,He=/^(`+)([^`]|[^`][\s\S]*?[^`])\1(?!`)/,ue=/^( {2,}|\\)\n(?!\s*$)/,Ze=/^(`+|[^`])(?:(?= {2,}\n)|[\s\S]*?(?:(?=[\\<!\[`*_]|\b_|$)|[^ ](?= {2,}\n)))/,D=/[\p{P}\p{S}]/u,X=/[\s\p{P}\p{S}]/u,pe=/[^\s\p{P}\p{S}]/u,Ge=d(/^((?![*_])punctSpace)/,"u").replace(/punctSpace/g,X).getRegex(),ce=/(?!~)[\p{P}\p{S}]/u,Ne=/(?!~)[\s\p{P}\p{S}]/u,Fe=/(?:[^\s\p{P}\p{S}]|~)/u,je=d(/link|precode-code|html/,"g").replace("link",/\[(?:[^\[\]`]|(?<a>`+)[^`]+\k<a>(?!`))*?\]\((?:\\[\s\S]|[^\\\(\)]|\((?:\\[\s\S]|[^\\\(\)])*\))*\)/).replace("precode-",Se?"(?<!`)()":"(^^|[^`])").replace("code",/(?<b>`+)[^`]+\k<b>(?!`)/).replace("html",/<(?! )[^<>]*?>/).getRegex(),he=/^(?:\*+(?:((?!\*)punct)|[^\s*]))|^_+(?:((?!_)punct)|([^\s_]))/,Qe=d(he,"u").replace(/punct/g,D).getRegex(),Ue=d(he,"u").replace(/punct/g,ce).getRegex(),de="^[^_*]*?__[^_*]*?\\*[^_*]*?(?=__)|[^*]+(?=[^*])|(?!\\*)punct(\\*+)(?=[\\s]|$)|notPunctSpace(\\*+)(?!\\*)(?=punctSpace|$)|(?!\\*)punctSpace(\\*+)(?=notPunctSpace)|[\\s](\\*+)(?!\\*)(?=punct)|(?!\\*)punct(\\*+)(?!\\*)(?=punct)|notPunctSpace(\\*+)(?=notPunctSpace)",Ke=d(de,"gu").replace(/notPunctSpace/g,pe).replace(/punctSpace/g,X).replace(/punct/g,D).getRegex(),We=d(de,"gu").replace(/notPunctSpace/g,Fe).replace(/punctSpace/g,Ne).replace(/punct/g,ce).getRegex(),Xe=d("^[^_*]*?\\*\\*[^_*]*?_[^_*]*?(?=\\*\\*)|[^_]+(?=[^_])|(?!_)punct(_+)(?=[\\s]|$)|notPunctSpace(_+)(?!_)(?=punctSpace|$)|(?!_)punctSpace(_+)(?=notPunctSpace)|[\\s](_+)(?!_)(?=punct)|(?!_)punct(_+)(?!_)(?=punct)","gu").replace(/notPunctSpace/g,pe).replace(/punctSpace/g,X).replace(/punct/g,D).getRegex(),Je=d(/\\(punct)/,"gu").replace(/punct/g,D).getRegex(),Ve=d(/^<(scheme:[^\s\x00-\x1f<>]*|email)>/).replace("scheme",/[a-zA-Z][a-zA-Z0-9+.-]{1,31}/).replace("email",/[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+(@)[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+(?![-_])/).getRegex(),Ye=d(K).replace("(?:-->|$)","-->").getRegex(),et=d("^comment|^</[a-zA-Z][\\w:-]*\\s*>|^<[a-zA-Z][\\w-]*(?:attribute)*?\\s*/?>|^<\\?[\\s\\S]*?\\?>|^<![a-zA-Z]+\\s[\\s\\S]*?>|^<!\\[CDATA\\[[\\s\\S]*?\\]\\]>").replace("comment",Ye).replace("attribute",/\s+[a-zA-Z:_][\w.:-]*(?:\s*=\s*"[^"]*"|\s*=\s*'[^']*'|\s*=\s*[^\s"'=<>`]+)?/).getRegex(),q=/(?:\[(?:\\[\s\S]|[^\[\]\\])*\]|\\[\s\S]|`+[^`]*?`+(?!`)|[^\[\]\\`])*?/,tt=d(/^!?\[(label)\]\(\s*(href)(?:(?:[ \t]*(?:\n[ \t]*)?)(title))?\s*\)/).replace("label",q).replace("href",/<(?:\\.|[^\n<>\\])+>|[^ \t\n\x00-\x1f]*/).replace("title",/"(?:\\"?|[^"\\])*"|'(?:\\'?|[^'\\])*'|\((?:\\\)?|[^)\\])*\)/).getRegex(),ke=d(/^!?\[(label)\]\[(ref)\]/).replace("label",q).replace("ref",U).getRegex(),ge=d(/^!?\[(ref)\](?:\[\])?/).replace("ref",U).getRegex(),nt=d("reflink|nolink(?!\\()","g").replace("reflink",ke).replace("nolink",ge).getRegex(),ie=/[hH][tT][tT][pP][sS]?|[fF][tT][pP]/,J={_backpedal:I,anyPunctuation:Je,autolink:Ve,blockSkip:je,br:ue,code:He,del:I,emStrongLDelim:Qe,emStrongRDelimAst:Ke,emStrongRDelimUnd:Xe,escape:De,link:tt,nolink:ge,punctuation:Ge,reflink:ke,reflinkSearch:nt,tag:et,text:Ze,url:I},rt={...J,link:d(/^!?\[(label)\]\((.*?)\)/).replace("label",q).getRegex(),reflink:d(/^!?\[(label)\]\s*\[([^\]]*)\]/).replace("label",q).getRegex()},F={...J,emStrongRDelimAst:We,emStrongLDelim:Ue,url:d(/^((?:protocol):\/\/|www\.)(?:[a-zA-Z0-9\-]+\.?)+[^\s<]*|^email/).replace("protocol",ie).replace("email",/[A-Za-z0-9._+-]+(@)[a-zA-Z0-9-_]+(?:\.[a-zA-Z0-9-_]*[a-zA-Z0-9])+(?![-_])/).getRegex(),_backpedal:/(?:[^?!.,:;*_'"~()&]+|\([^)]*\)|&(?![a-zA-Z0-9]+;$)|[?!.,:;*_'"~)]+(?!$))+/,del:/^(~~?)(?=[^\s~])((?:\\[\s\S]|[^\\])*?(?:\\[\s\S]|[^\s~\\]))\1(?=[^~]|$)/,text:d(/^([`~]+|[^`~])(?:(?= {2,}\n)|(?=[a-zA-Z0-9.!#$%&'*+\/=?_`{\|}~-]+@)|[\s\S]*?(?:(?=[\\<!\[`*~_]|\b_|protocol:\/\/|www\.|$)|[^ ](?= {2,}\n)|[^a-zA-Z0-9.!#$%&'*+\/=?_`{\|}~-](?=[a-zA-Z0-9.!#$%&'*+\/=?_`{\|}~-]+@)))/).replace("protocol",ie).getRegex()},st={...F,br:d(ue).replace("{2,}","*").getRegex(),text:d(F.text).replace("\\b_","\\b_| {2,}\\n").replace(/\{2,\}/g,"*").getRegex()},B={normal:W,gfm:qe,pedantic:ve},M={normal:J,gfm:F,breaks:st,pedantic:rt};var it={"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"},fe=l=>it[l];function w(l,e){if(e){if(m.escapeTest.test(l))return l.replace(m.escapeReplace,fe)}else if(m.escapeTestNoEncode.test(l))return l.replace(m.escapeReplaceNoEncode,fe);return l}function V(l){try{l=encodeURI(l).replace(m.percentDecode,"%")}catch{return null}return l}function Y(l,e){let t=l.replace(m.findPipe,(i,s,a)=>{let o=!1,p=s;for(;--p>=0&&a[p]==="\\";)o=!o;return o?"|":" |"}),n=t.split(m.splitPipe),r=0;if(n[0].trim()||n.shift(),n.length>0&&!n.at(-1)?.trim()&&n.pop(),e)if(n.length>e)n.splice(e);else for(;n.length<e;)n.push("");for(;r<n.length;r++)n[r]=n[r].trim().replace(m.slashPipe,"|");return n}function z(l,e,t){let n=l.length;if(n===0)return"";let r=0;for(;r<n;){let i=l.charAt(n-r-1);if(i===e&&!t)r++;else if(i!==e&&t)r++;else break}return l.slice(0,n-r)}function me(l,e){if(l.indexOf(e[1])===-1)return-1;let t=0;for(let n=0;n<l.length;n++)if(l[n]==="\\")n++;else if(l[n]===e[0])t++;else if(l[n]===e[1]&&(t--,t<0))return n;return t>0?-2:-1}function xe(l,e,t,n,r){let i=e.href,s=e.title||null,a=l[1].replace(r.other.outputLinkReplace,"$1");n.state.inLink=!0;let o={type:l[0].charAt(0)==="!"?"image":"link",raw:t,href:i,title:s,text:a,tokens:n.inlineTokens(a)};return n.state.inLink=!1,o}function ot(l,e,t){let n=l.match(t.other.indentCodeCompensation);if(n===null)return e;let r=n[1];return e.split(`
+`).map(i=>{let s=i.match(t.other.beginningSpace);if(s===null)return i;let[a]=s;return a.length>=r.length?i.slice(r.length):i}).join(`
+`)}var y=class{options;rules;lexer;constructor(e){this.options=e||T}space(e){let t=this.rules.block.newline.exec(e);if(t&&t[0].length>0)return{type:"space",raw:t[0]}}code(e){let t=this.rules.block.code.exec(e);if(t){let n=t[0].replace(this.rules.other.codeRemoveIndent,"");return{type:"code",raw:t[0],codeBlockStyle:"indented",text:this.options.pedantic?n:z(n,`
+`)}}}fences(e){let t=this.rules.block.fences.exec(e);if(t){let n=t[0],r=ot(n,t[3]||"",this.rules);return{type:"code",raw:n,lang:t[2]?t[2].trim().replace(this.rules.inline.anyPunctuation,"$1"):t[2],text:r}}}heading(e){let t=this.rules.block.heading.exec(e);if(t){let n=t[2].trim();if(this.rules.other.endingHash.test(n)){let r=z(n,"#");(this.options.pedantic||!r||this.rules.other.endingSpaceChar.test(r))&&(n=r.trim())}return{type:"heading",raw:t[0],depth:t[1].length,text:n,tokens:this.lexer.inline(n)}}}hr(e){let t=this.rules.block.hr.exec(e);if(t)return{type:"hr",raw:z(t[0],`
+`)}}blockquote(e){let t=this.rules.block.blockquote.exec(e);if(t){let n=z(t[0],`
+`).split(`
+`),r="",i="",s=[];for(;n.length>0;){let a=!1,o=[],p;for(p=0;p<n.length;p++)if(this.rules.other.blockquoteStart.test(n[p]))o.push(n[p]),a=!0;else if(!a)o.push(n[p]);else break;n=n.slice(p);let u=o.join(`
+`),c=u.replace(this.rules.other.blockquoteSetextReplace,`
+    $1`).replace(this.rules.other.blockquoteSetextReplace2,"");r=r?`${r}
+${u}`:u,i=i?`${i}
+${c}`:c;let g=this.lexer.state.top;if(this.lexer.state.top=!0,this.lexer.blockTokens(c,s,!0),this.lexer.state.top=g,n.length===0)break;let h=s.at(-1);if(h?.type==="code")break;if(h?.type==="blockquote"){let R=h,f=R.raw+`
+`+n.join(`
+`),O=this.blockquote(f);s[s.length-1]=O,r=r.substring(0,r.length-R.raw.length)+O.raw,i=i.substring(0,i.length-R.text.length)+O.text;break}else if(h?.type==="list"){let R=h,f=R.raw+`
+`+n.join(`
+`),O=this.list(f);s[s.length-1]=O,r=r.substring(0,r.length-h.raw.length)+O.raw,i=i.substring(0,i.length-R.raw.length)+O.raw,n=f.substring(s.at(-1).raw.length).split(`
+`);continue}}return{type:"blockquote",raw:r,tokens:s,text:i}}}list(e){let t=this.rules.block.list.exec(e);if(t){let n=t[1].trim(),r=n.length>1,i={type:"list",raw:"",ordered:r,start:r?+n.slice(0,-1):"",loose:!1,items:[]};n=r?`\\d{1,9}\\${n.slice(-1)}`:`\\${n}`,this.options.pedantic&&(n=r?n:"[*+-]");let s=this.rules.other.listItemRegex(n),a=!1;for(;e;){let p=!1,u="",c="";if(!(t=s.exec(e))||this.rules.block.hr.test(e))break;u=t[0],e=e.substring(u.length);let g=t[2].split(`
+`,1)[0].replace(this.rules.other.listReplaceTabs,H=>" ".repeat(3*H.length)),h=e.split(`
+`,1)[0],R=!g.trim(),f=0;if(this.options.pedantic?(f=2,c=g.trimStart()):R?f=t[1].length+1:(f=t[2].search(this.rules.other.nonSpaceChar),f=f>4?1:f,c=g.slice(f),f+=t[1].length),R&&this.rules.other.blankLine.test(h)&&(u+=h+`
+`,e=e.substring(h.length+1),p=!0),!p){let H=this.rules.other.nextBulletRegex(f),te=this.rules.other.hrRegex(f),ne=this.rules.other.fencesBeginRegex(f),re=this.rules.other.headingBeginRegex(f),be=this.rules.other.htmlBeginRegex(f);for(;e;){let Z=e.split(`
+`,1)[0],E;if(h=Z,this.options.pedantic?(h=h.replace(this.rules.other.listReplaceNesting,"  "),E=h):E=h.replace(this.rules.other.tabCharGlobal,"    "),ne.test(h)||re.test(h)||be.test(h)||H.test(h)||te.test(h))break;if(E.search(this.rules.other.nonSpaceChar)>=f||!h.trim())c+=`
+`+E.slice(f);else{if(R||g.replace(this.rules.other.tabCharGlobal,"    ").search(this.rules.other.nonSpaceChar)>=4||ne.test(g)||re.test(g)||te.test(g))break;c+=`
+`+h}!R&&!h.trim()&&(R=!0),u+=Z+`
+`,e=e.substring(Z.length+1),g=E.slice(f)}}i.loose||(a?i.loose=!0:this.rules.other.doubleBlankLine.test(u)&&(a=!0));let O=null,ee;this.options.gfm&&(O=this.rules.other.listIsTask.exec(c),O&&(ee=O[0]!=="[ ] ",c=c.replace(this.rules.other.listReplaceTask,""))),i.items.push({type:"list_item",raw:u,task:!!O,checked:ee,loose:!1,text:c,tokens:[]}),i.raw+=u}let o=i.items.at(-1);if(o)o.raw=o.raw.trimEnd(),o.text=o.text.trimEnd();else return;i.raw=i.raw.trimEnd();for(let p=0;p<i.items.length;p++)if(this.lexer.state.top=!1,i.items[p].tokens=this.lexer.blockTokens(i.items[p].text,[]),!i.loose){let u=i.items[p].tokens.filter(g=>g.type==="space"),c=u.length>0&&u.some(g=>this.rules.other.anyLine.test(g.raw));i.loose=c}if(i.loose)for(let p=0;p<i.items.length;p++)i.items[p].loose=!0;return i}}html(e){let t=this.rules.block.html.exec(e);if(t)return{type:"html",block:!0,raw:t[0],pre:t[1]==="pre"||t[1]==="script"||t[1]==="style",text:t[0]}}def(e){let t=this.rules.block.def.exec(e);if(t){let n=t[1].toLowerCase().replace(this.rules.other.multipleSpaceGlobal," "),r=t[2]?t[2].replace(this.rules.other.hrefBrackets,"$1").replace(this.rules.inline.anyPunctuation,"$1"):"",i=t[3]?t[3].substring(1,t[3].length-1).replace(this.rules.inline.anyPunctuation,"$1"):t[3];return{type:"def",tag:n,raw:t[0],href:r,title:i}}}table(e){let t=this.rules.block.table.exec(e);if(!t||!this.rules.other.tableDelimiter.test(t[2]))return;let n=Y(t[1]),r=t[2].replace(this.rules.other.tableAlignChars,"").split("|"),i=t[3]?.trim()?t[3].replace(this.rules.other.tableRowBlankLine,"").split(`
+`):[],s={type:"table",raw:t[0],header:[],align:[],rows:[]};if(n.length===r.length){for(let a of r)this.rules.other.tableAlignRight.test(a)?s.align.push("right"):this.rules.other.tableAlignCenter.test(a)?s.align.push("center"):this.rules.other.tableAlignLeft.test(a)?s.align.push("left"):s.align.push(null);for(let a=0;a<n.length;a++)s.header.push({text:n[a],tokens:this.lexer.inline(n[a]),header:!0,align:s.align[a]});for(let a of i)s.rows.push(Y(a,s.header.length).map((o,p)=>({text:o,tokens:this.lexer.inline(o),header:!1,align:s.align[p]})));return s}}lheading(e){let t=this.rules.block.lheading.exec(e);if(t)return{type:"heading",raw:t[0],depth:t[2].charAt(0)==="="?1:2,text:t[1],tokens:this.lexer.inline(t[1])}}paragraph(e){let t=this.rules.block.paragraph.exec(e);if(t){let n=t[1].charAt(t[1].length-1)===`
+`?t[1].slice(0,-1):t[1];return{type:"paragraph",raw:t[0],text:n,tokens:this.lexer.inline(n)}}}text(e){let t=this.rules.block.text.exec(e);if(t)return{type:"text",raw:t[0],text:t[0],tokens:this.lexer.inline(t[0])}}escape(e){let t=this.rules.inline.escape.exec(e);if(t)return{type:"escape",raw:t[0],text:t[1]}}tag(e){let t=this.rules.inline.tag.exec(e);if(t)return!this.lexer.state.inLink&&this.rules.other.startATag.test(t[0])?this.lexer.state.inLink=!0:this.lexer.state.inLink&&this.rules.other.endATag.test(t[0])&&(this.lexer.state.inLink=!1),!this.lexer.state.inRawBlock&&this.rules.other.startPreScriptTag.test(t[0])?this.lexer.state.inRawBlock=!0:this.lexer.state.inRawBlock&&this.rules.other.endPreScriptTag.test(t[0])&&(this.lexer.state.inRawBlock=!1),{type:"html",raw:t[0],inLink:this.lexer.state.inLink,inRawBlock:this.lexer.state.inRawBlock,block:!1,text:t[0]}}link(e){let t=this.rules.inline.link.exec(e);if(t){let n=t[2].trim();if(!this.options.pedantic&&this.rules.other.startAngleBracket.test(n)){if(!this.rules.other.endAngleBracket.test(n))return;let s=z(n.slice(0,-1),"\\");if((n.length-s.length)%2===0)return}else{let s=me(t[2],"()");if(s===-2)return;if(s>-1){let o=(t[0].indexOf("!")===0?5:4)+t[1].length+s;t[2]=t[2].substring(0,s),t[0]=t[0].substring(0,o).trim(),t[3]=""}}let r=t[2],i="";if(this.options.pedantic){let s=this.rules.other.pedanticHrefTitle.exec(r);s&&(r=s[1],i=s[3])}else i=t[3]?t[3].slice(1,-1):"";return r=r.trim(),this.rules.other.startAngleBracket.test(r)&&(this.options.pedantic&&!this.rules.other.endAngleBracket.test(n)?r=r.slice(1):r=r.slice(1,-1)),xe(t,{href:r&&r.replace(this.rules.inline.anyPunctuation,"$1"),title:i&&i.replace(this.rules.inline.anyPunctuation,"$1")},t[0],this.lexer,this.rules)}}reflink(e,t){let n;if((n=this.rules.inline.reflink.exec(e))||(n=this.rules.inline.nolink.exec(e))){let r=(n[2]||n[1]).replace(this.rules.other.multipleSpaceGlobal," "),i=t[r.toLowerCase()];if(!i){let s=n[0].charAt(0);return{type:"text",raw:s,text:s}}return xe(n,i,n[0],this.lexer,this.rules)}}emStrong(e,t,n=""){let r=this.rules.inline.emStrongLDelim.exec(e);if(!r||r[3]&&n.match(this.rules.other.unicodeAlphaNumeric))return;if(!(r[1]||r[2]||"")||!n||this.rules.inline.punctuation.exec(n)){let s=[...r[0]].length-1,a,o,p=s,u=0,c=r[0][0]==="*"?this.rules.inline.emStrongRDelimAst:this.rules.inline.emStrongRDelimUnd;for(c.lastIndex=0,t=t.slice(-1*e.length+s);(r=c.exec(t))!=null;){if(a=r[1]||r[2]||r[3]||r[4]||r[5]||r[6],!a)continue;if(o=[...a].length,r[3]||r[4]){p+=o;continue}else if((r[5]||r[6])&&s%3&&!((s+o)%3)){u+=o;continue}if(p-=o,p>0)continue;o=Math.min(o,o+p+u);let g=[...r[0]][0].length,h=e.slice(0,s+r.index+g+o);if(Math.min(s,o)%2){let f=h.slice(1,-1);return{type:"em",raw:h,text:f,tokens:this.lexer.inlineTokens(f)}}let R=h.slice(2,-2);return{type:"strong",raw:h,text:R,tokens:this.lexer.inlineTokens(R)}}}}codespan(e){let t=this.rules.inline.code.exec(e);if(t){let n=t[2].replace(this.rules.other.newLineCharGlobal," "),r=this.rules.other.nonSpaceChar.test(n),i=this.rules.other.startingSpaceChar.test(n)&&this.rules.other.endingSpaceChar.test(n);return r&&i&&(n=n.substring(1,n.length-1)),{type:"codespan",raw:t[0],text:n}}}br(e){let t=this.rules.inline.br.exec(e);if(t)return{type:"br",raw:t[0]}}del(e){let t=this.rules.inline.del.exec(e);if(t)return{type:"del",raw:t[0],text:t[2],tokens:this.lexer.inlineTokens(t[2])}}autolink(e){let t=this.rules.inline.autolink.exec(e);if(t){let n,r;return t[2]==="@"?(n=t[1],r="mailto:"+n):(n=t[1],r=n),{type:"link",raw:t[0],text:n,href:r,tokens:[{type:"text",raw:n,text:n}]}}}url(e){let t;if(t=this.rules.inline.url.exec(e)){let n,r;if(t[2]==="@")n=t[0],r="mailto:"+n;else{let i;do i=t[0],t[0]=this.rules.inline._backpedal.exec(t[0])?.[0]??"";while(i!==t[0]);n=t[0],t[1]==="www."?r="http://"+t[0]:r=t[0]}return{type:"link",raw:t[0],text:n,href:r,tokens:[{type:"text",raw:n,text:n}]}}}inlineText(e){let t=this.rules.inline.text.exec(e);if(t){let n=this.lexer.state.inRawBlock;return{type:"text",raw:t[0],text:t[0],escaped:n}}}};var x=class l{tokens;options;state;tokenizer;inlineQueue;constructor(e){this.tokens=[],this.tokens.links=Object.create(null),this.options=e||T,this.options.tokenizer=this.options.tokenizer||new y,this.tokenizer=this.options.tokenizer,this.tokenizer.options=this.options,this.tokenizer.lexer=this,this.inlineQueue=[],this.state={inLink:!1,inRawBlock:!1,top:!0};let t={other:m,block:B.normal,inline:M.normal};this.options.pedantic?(t.block=B.pedantic,t.inline=M.pedantic):this.options.gfm&&(t.block=B.gfm,this.options.breaks?t.inline=M.breaks:t.inline=M.gfm),this.tokenizer.rules=t}static get rules(){return{block:B,inline:M}}static lex(e,t){return new l(t).lex(e)}static lexInline(e,t){return new l(t).inlineTokens(e)}lex(e){e=e.replace(m.carriageReturn,`
+`),this.blockTokens(e,this.tokens);for(let t=0;t<this.inlineQueue.length;t++){let n=this.inlineQueue[t];this.inlineTokens(n.src,n.tokens)}return this.inlineQueue=[],this.tokens}blockTokens(e,t=[],n=!1){for(this.options.pedantic&&(e=e.replace(m.tabCharGlobal,"    ").replace(m.spaceLine,""));e;){let r;if(this.options.extensions?.block?.some(s=>(r=s.call({lexer:this},e,t))?(e=e.substring(r.raw.length),t.push(r),!0):!1))continue;if(r=this.tokenizer.space(e)){e=e.substring(r.raw.length);let s=t.at(-1);r.raw.length===1&&s!==void 0?s.raw+=`
+`:t.push(r);continue}if(r=this.tokenizer.code(e)){e=e.substring(r.raw.length);let s=t.at(-1);s?.type==="paragraph"||s?.type==="text"?(s.raw+=(s.raw.endsWith(`
+`)?"":`
+`)+r.raw,s.text+=`
+`+r.text,this.inlineQueue.at(-1).src=s.text):t.push(r);continue}if(r=this.tokenizer.fences(e)){e=e.substring(r.raw.length),t.push(r);continue}if(r=this.tokenizer.heading(e)){e=e.substring(r.raw.length),t.push(r);continue}if(r=this.tokenizer.hr(e)){e=e.substring(r.raw.length),t.push(r);continue}if(r=this.tokenizer.blockquote(e)){e=e.substring(r.raw.length),t.push(r);continue}if(r=this.tokenizer.list(e)){e=e.substring(r.raw.length),t.push(r);continue}if(r=this.tokenizer.html(e)){e=e.substring(r.raw.length),t.push(r);continue}if(r=this.tokenizer.def(e)){e=e.substring(r.raw.length);let s=t.at(-1);s?.type==="paragraph"||s?.type==="text"?(s.raw+=(s.raw.endsWith(`
+`)?"":`
+`)+r.raw,s.text+=`
+`+r.raw,this.inlineQueue.at(-1).src=s.text):this.tokens.links[r.tag]||(this.tokens.links[r.tag]={href:r.href,title:r.title},t.push(r));continue}if(r=this.tokenizer.table(e)){e=e.substring(r.raw.length),t.push(r);continue}if(r=this.tokenizer.lheading(e)){e=e.substring(r.raw.length),t.push(r);continue}let i=e;if(this.options.extensions?.startBlock){let s=1/0,a=e.slice(1),o;this.options.extensions.startBlock.forEach(p=>{o=p.call({lexer:this},a),typeof o=="number"&&o>=0&&(s=Math.min(s,o))}),s<1/0&&s>=0&&(i=e.substring(0,s+1))}if(this.state.top&&(r=this.tokenizer.paragraph(i))){let s=t.at(-1);n&&s?.type==="paragraph"?(s.raw+=(s.raw.endsWith(`
+`)?"":`
+`)+r.raw,s.text+=`
+`+r.text,this.inlineQueue.pop(),this.inlineQueue.at(-1).src=s.text):t.push(r),n=i.length!==e.length,e=e.substring(r.raw.length);continue}if(r=this.tokenizer.text(e)){e=e.substring(r.raw.length);let s=t.at(-1);s?.type==="text"?(s.raw+=(s.raw.endsWith(`
+`)?"":`
+`)+r.raw,s.text+=`
+`+r.text,this.inlineQueue.pop(),this.inlineQueue.at(-1).src=s.text):t.push(r);continue}if(e){let s="Infinite loop on byte: "+e.charCodeAt(0);if(this.options.silent){console.error(s);break}else throw new Error(s)}}return this.state.top=!0,t}inline(e,t=[]){return this.inlineQueue.push({src:e,tokens:t}),t}inlineTokens(e,t=[]){let n=e,r=null;if(this.tokens.links){let o=Object.keys(this.tokens.links);if(o.length>0)for(;(r=this.tokenizer.rules.inline.reflinkSearch.exec(n))!=null;)o.includes(r[0].slice(r[0].lastIndexOf("[")+1,-1))&&(n=n.slice(0,r.index)+"["+"a".repeat(r[0].length-2)+"]"+n.slice(this.tokenizer.rules.inline.reflinkSearch.lastIndex))}for(;(r=this.tokenizer.rules.inline.anyPunctuation.exec(n))!=null;)n=n.slice(0,r.index)+"++"+n.slice(this.tokenizer.rules.inline.anyPunctuation.lastIndex);let i;for(;(r=this.tokenizer.rules.inline.blockSkip.exec(n))!=null;)i=r[2]?r[2].length:0,n=n.slice(0,r.index+i)+"["+"a".repeat(r[0].length-i-2)+"]"+n.slice(this.tokenizer.rules.inline.blockSkip.lastIndex);n=this.options.hooks?.emStrongMask?.call({lexer:this},n)??n;let s=!1,a="";for(;e;){s||(a=""),s=!1;let o;if(this.options.extensions?.inline?.some(u=>(o=u.call({lexer:this},e,t))?(e=e.substring(o.raw.length),t.push(o),!0):!1))continue;if(o=this.tokenizer.escape(e)){e=e.substring(o.raw.length),t.push(o);continue}if(o=this.tokenizer.tag(e)){e=e.substring(o.raw.length),t.push(o);continue}if(o=this.tokenizer.link(e)){e=e.substring(o.raw.length),t.push(o);continue}if(o=this.tokenizer.reflink(e,this.tokens.links)){e=e.substring(o.raw.length);let u=t.at(-1);o.type==="text"&&u?.type==="text"?(u.raw+=o.raw,u.text+=o.text):t.push(o);continue}if(o=this.tokenizer.emStrong(e,n,a)){e=e.substring(o.raw.length),t.push(o);continue}if(o=this.tokenizer.codespan(e)){e=e.substring(o.raw.length),t.push(o);continue}if(o=this.tokenizer.br(e)){e=e.substring(o.raw.length),t.push(o);continue}if(o=this.tokenizer.del(e)){e=e.substring(o.raw.length),t.push(o);continue}if(o=this.tokenizer.autolink(e)){e=e.substring(o.raw.length),t.push(o);continue}if(!this.state.inLink&&(o=this.tokenizer.url(e))){e=e.substring(o.raw.length),t.push(o);continue}let p=e;if(this.options.extensions?.startInline){let u=1/0,c=e.slice(1),g;this.options.extensions.startInline.forEach(h=>{g=h.call({lexer:this},c),typeof g=="number"&&g>=0&&(u=Math.min(u,g))}),u<1/0&&u>=0&&(p=e.substring(0,u+1))}if(o=this.tokenizer.inlineText(p)){e=e.substring(o.raw.length),o.raw.slice(-1)!=="_"&&(a=o.raw.slice(-1)),s=!0;let u=t.at(-1);u?.type==="text"?(u.raw+=o.raw,u.text+=o.text):t.push(o);continue}if(e){let u="Infinite loop on byte: "+e.charCodeAt(0);if(this.options.silent){console.error(u);break}else throw new Error(u)}}return t}};var P=class{options;parser;constructor(e){this.options=e||T}space(e){return""}code({text:e,lang:t,escaped:n}){let r=(t||"").match(m.notSpaceStart)?.[0],i=e.replace(m.endingNewline,"")+`
+`;return r?'<pre><code class="language-'+w(r)+'">'+(n?i:w(i,!0))+`</code></pre>
+`:"<pre><code>"+(n?i:w(i,!0))+`</code></pre>
+`}blockquote({tokens:e}){return`<blockquote>
+${this.parser.parse(e)}</blockquote>
+`}html({text:e}){return e}def(e){return""}heading({tokens:e,depth:t}){return`<h${t}>${this.parser.parseInline(e)}</h${t}>
+`}hr(e){return`<hr>
+`}list(e){let t=e.ordered,n=e.start,r="";for(let a=0;a<e.items.length;a++){let o=e.items[a];r+=this.listitem(o)}let i=t?"ol":"ul",s=t&&n!==1?' start="'+n+'"':"";return"<"+i+s+`>
+`+r+"</"+i+`>
+`}listitem(e){let t="";if(e.task){let n=this.checkbox({checked:!!e.checked});e.loose?e.tokens[0]?.type==="paragraph"?(e.tokens[0].text=n+" "+e.tokens[0].text,e.tokens[0].tokens&&e.tokens[0].tokens.length>0&&e.tokens[0].tokens[0].type==="text"&&(e.tokens[0].tokens[0].text=n+" "+w(e.tokens[0].tokens[0].text),e.tokens[0].tokens[0].escaped=!0)):e.tokens.unshift({type:"text",raw:n+" ",text:n+" ",escaped:!0}):t+=n+" "}return t+=this.parser.parse(e.tokens,!!e.loose),`<li>${t}</li>
+`}checkbox({checked:e}){return"<input "+(e?'checked="" ':"")+'disabled="" type="checkbox">'}paragraph({tokens:e}){return`<p>${this.parser.parseInline(e)}</p>
+`}table(e){let t="",n="";for(let i=0;i<e.header.length;i++)n+=this.tablecell(e.header[i]);t+=this.tablerow({text:n});let r="";for(let i=0;i<e.rows.length;i++){let s=e.rows[i];n="";for(let a=0;a<s.length;a++)n+=this.tablecell(s[a]);r+=this.tablerow({text:n})}return r&&(r=`<tbody>${r}</tbody>`),`<table>
+<thead>
+`+t+`</thead>
+`+r+`</table>
+`}tablerow({text:e}){return`<tr>
+${e}</tr>
+`}tablecell(e){let t=this.parser.parseInline(e.tokens),n=e.header?"th":"td";return(e.align?`<${n} align="${e.align}">`:`<${n}>`)+t+`</${n}>
+`}strong({tokens:e}){return`<strong>${this.parser.parseInline(e)}</strong>`}em({tokens:e}){return`<em>${this.parser.parseInline(e)}</em>`}codespan({text:e}){return`<code>${w(e,!0)}</code>`}br(e){return"<br>"}del({tokens:e}){return`<del>${this.parser.parseInline(e)}</del>`}link({href:e,title:t,tokens:n}){let r=this.parser.parseInline(n),i=V(e);if(i===null)return r;e=i;let s='<a href="'+e+'"';return t&&(s+=' title="'+w(t)+'"'),s+=">"+r+"</a>",s}image({href:e,title:t,text:n,tokens:r}){r&&(n=this.parser.parseInline(r,this.parser.textRenderer));let i=V(e);if(i===null)return w(n);e=i;let s=`<img src="${e}" alt="${n}"`;return t&&(s+=` title="${w(t)}"`),s+=">",s}text(e){return"tokens"in e&&e.tokens?this.parser.parseInline(e.tokens):"escaped"in e&&e.escaped?e.text:w(e.text)}};var $=class{strong({text:e}){return e}em({text:e}){return e}codespan({text:e}){return e}del({text:e}){return e}html({text:e}){return e}text({text:e}){return e}link({text:e}){return""+e}image({text:e}){return""+e}br(){return""}};var b=class l{options;renderer;textRenderer;constructor(e){this.options=e||T,this.options.renderer=this.options.renderer||new P,this.renderer=this.options.renderer,this.renderer.options=this.options,this.renderer.parser=this,this.textRenderer=new $}static parse(e,t){return new l(t).parse(e)}static parseInline(e,t){return new l(t).parseInline(e)}parse(e,t=!0){let n="";for(let r=0;r<e.length;r++){let i=e[r];if(this.options.extensions?.renderers?.[i.type]){let a=i,o=this.options.extensions.renderers[a.type].call({parser:this},a);if(o!==!1||!["space","hr","heading","code","table","blockquote","list","html","def","paragraph","text"].includes(a.type)){n+=o||"";continue}}let s=i;switch(s.type){case"space":{n+=this.renderer.space(s);continue}case"hr":{n+=this.renderer.hr(s);continue}case"heading":{n+=this.renderer.heading(s);continue}case"code":{n+=this.renderer.code(s);continue}case"table":{n+=this.renderer.table(s);continue}case"blockquote":{n+=this.renderer.blockquote(s);continue}case"list":{n+=this.renderer.list(s);continue}case"html":{n+=this.renderer.html(s);continue}case"def":{n+=this.renderer.def(s);continue}case"paragraph":{n+=this.renderer.paragraph(s);continue}case"text":{let a=s,o=this.renderer.text(a);for(;r+1<e.length&&e[r+1].type==="text";)a=e[++r],o+=`
+`+this.renderer.text(a);t?n+=this.renderer.paragraph({type:"paragraph",raw:o,text:o,tokens:[{type:"text",raw:o,text:o,escaped:!0}]}):n+=o;continue}default:{let a='Token with "'+s.type+'" type was not found.';if(this.options.silent)return console.error(a),"";throw new Error(a)}}}return n}parseInline(e,t=this.renderer){let n="";for(let r=0;r<e.length;r++){let i=e[r];if(this.options.extensions?.renderers?.[i.type]){let a=this.options.extensions.renderers[i.type].call({parser:this},i);if(a!==!1||!["escape","html","link","image","strong","em","codespan","br","del","text"].includes(i.type)){n+=a||"";continue}}let s=i;switch(s.type){case"escape":{n+=t.text(s);break}case"html":{n+=t.html(s);break}case"link":{n+=t.link(s);break}case"image":{n+=t.image(s);break}case"strong":{n+=t.strong(s);break}case"em":{n+=t.em(s);break}case"codespan":{n+=t.codespan(s);break}case"br":{n+=t.br(s);break}case"del":{n+=t.del(s);break}case"text":{n+=t.text(s);break}default:{let a='Token with "'+s.type+'" type was not found.';if(this.options.silent)return console.error(a),"";throw new Error(a)}}}return n}};var S=class{options;block;constructor(e){this.options=e||T}static passThroughHooks=new Set(["preprocess","postprocess","processAllTokens","emStrongMask"]);static passThroughHooksRespectAsync=new Set(["preprocess","postprocess","processAllTokens"]);preprocess(e){return e}postprocess(e){return e}processAllTokens(e){return e}emStrongMask(e){return e}provideLexer(){return this.block?x.lex:x.lexInline}provideParser(){return this.block?b.parse:b.parseInline}};var A=class{defaults=_();options=this.setOptions;parse=this.parseMarkdown(!0);parseInline=this.parseMarkdown(!1);Parser=b;Renderer=P;TextRenderer=$;Lexer=x;Tokenizer=y;Hooks=S;constructor(...e){this.use(...e)}walkTokens(e,t){let n=[];for(let r of e)switch(n=n.concat(t.call(this,r)),r.type){case"table":{let i=r;for(let s of i.header)n=n.concat(this.walkTokens(s.tokens,t));for(let s of i.rows)for(let a of s)n=n.concat(this.walkTokens(a.tokens,t));break}case"list":{let i=r;n=n.concat(this.walkTokens(i.items,t));break}default:{let i=r;this.defaults.extensions?.childTokens?.[i.type]?this.defaults.extensions.childTokens[i.type].forEach(s=>{let a=i[s].flat(1/0);n=n.concat(this.walkTokens(a,t))}):i.tokens&&(n=n.concat(this.walkTokens(i.tokens,t)))}}return n}use(...e){let t=this.defaults.extensions||{renderers:{},childTokens:{}};return e.forEach(n=>{let r={...n};if(r.async=this.defaults.async||r.async||!1,n.extensions&&(n.extensions.forEach(i=>{if(!i.name)throw new Error("extension name required");if("renderer"in i){let s=t.renderers[i.name];s?t.renderers[i.name]=function(...a){let o=i.renderer.apply(this,a);return o===!1&&(o=s.apply(this,a)),o}:t.renderers[i.name]=i.renderer}if("tokenizer"in i){if(!i.level||i.level!=="block"&&i.level!=="inline")throw new Error("extension level must be 'block' or 'inline'");let s=t[i.level];s?s.unshift(i.tokenizer):t[i.level]=[i.tokenizer],i.start&&(i.level==="block"?t.startBlock?t.startBlock.push(i.start):t.startBlock=[i.start]:i.level==="inline"&&(t.startInline?t.startInline.push(i.start):t.startInline=[i.start]))}"childTokens"in i&&i.childTokens&&(t.childTokens[i.name]=i.childTokens)}),r.extensions=t),n.renderer){let i=this.defaults.renderer||new P(this.defaults);for(let s in n.renderer){if(!(s in i))throw new Error(`renderer '${s}' does not exist`);if(["options","parser"].includes(s))continue;let a=s,o=n.renderer[a],p=i[a];i[a]=(...u)=>{let c=o.apply(i,u);return c===!1&&(c=p.apply(i,u)),c||""}}r.renderer=i}if(n.tokenizer){let i=this.defaults.tokenizer||new y(this.defaults);for(let s in n.tokenizer){if(!(s in i))throw new Error(`tokenizer '${s}' does not exist`);if(["options","rules","lexer"].includes(s))continue;let a=s,o=n.tokenizer[a],p=i[a];i[a]=(...u)=>{let c=o.apply(i,u);return c===!1&&(c=p.apply(i,u)),c}}r.tokenizer=i}if(n.hooks){let i=this.defaults.hooks||new S;for(let s in n.hooks){if(!(s in i))throw new Error(`hook '${s}' does not exist`);if(["options","block"].includes(s))continue;let a=s,o=n.hooks[a],p=i[a];S.passThroughHooks.has(s)?i[a]=u=>{if(this.defaults.async&&S.passThroughHooksRespectAsync.has(s))return(async()=>{let g=await o.call(i,u);return p.call(i,g)})();let c=o.call(i,u);return p.call(i,c)}:i[a]=(...u)=>{if(this.defaults.async)return(async()=>{let g=await o.apply(i,u);return g===!1&&(g=await p.apply(i,u)),g})();let c=o.apply(i,u);return c===!1&&(c=p.apply(i,u)),c}}r.hooks=i}if(n.walkTokens){let i=this.defaults.walkTokens,s=n.walkTokens;r.walkTokens=function(a){let o=[];return o.push(s.call(this,a)),i&&(o=o.concat(i.call(this,a))),o}}this.defaults={...this.defaults,...r}}),this}setOptions(e){return this.defaults={...this.defaults,...e},this}lexer(e,t){return x.lex(e,t??this.defaults)}parser(e,t){return b.parse(e,t??this.defaults)}parseMarkdown(e){return(n,r)=>{let i={...r},s={...this.defaults,...i},a=this.onError(!!s.silent,!!s.async);if(this.defaults.async===!0&&i.async===!1)return a(new Error("marked(): The async option was set to true by an extension. Remove async: false from the parse options object to return a Promise."));if(typeof n>"u"||n===null)return a(new Error("marked(): input parameter is undefined or null"));if(typeof n!="string")return a(new Error("marked(): input parameter is of type "+Object.prototype.toString.call(n)+", string expected"));if(s.hooks&&(s.hooks.options=s,s.hooks.block=e),s.async)return(async()=>{let o=s.hooks?await s.hooks.preprocess(n):n,u=await(s.hooks?await s.hooks.provideLexer():e?x.lex:x.lexInline)(o,s),c=s.hooks?await s.hooks.processAllTokens(u):u;s.walkTokens&&await Promise.all(this.walkTokens(c,s.walkTokens));let h=await(s.hooks?await s.hooks.provideParser():e?b.parse:b.parseInline)(c,s);return s.hooks?await s.hooks.postprocess(h):h})().catch(a);try{s.hooks&&(n=s.hooks.preprocess(n));let p=(s.hooks?s.hooks.provideLexer():e?x.lex:x.lexInline)(n,s);s.hooks&&(p=s.hooks.processAllTokens(p)),s.walkTokens&&this.walkTokens(p,s.walkTokens);let c=(s.hooks?s.hooks.provideParser():e?b.parse:b.parseInline)(p,s);return s.hooks&&(c=s.hooks.postprocess(c)),c}catch(o){return a(o)}}}onError(e,t){return n=>{if(n.message+=`
+Please report this to https://github.com/markedjs/marked.`,e){let r="<p>An error occurred:</p><pre>"+w(n.message+"",!0)+"</pre>";return t?Promise.resolve(r):r}if(t)return Promise.reject(n);throw n}}};var L=new A;function k(l,e){return L.parse(l,e)}k.options=k.setOptions=function(l){return L.setOptions(l),k.defaults=L.defaults,N(k.defaults),k};k.getDefaults=_;k.defaults=T;k.use=function(...l){return L.use(...l),k.defaults=L.defaults,N(k.defaults),k};k.walkTokens=function(l,e){return L.walkTokens(l,e)};k.parseInline=L.parseInline;k.Parser=b;k.parser=b.parse;k.Renderer=P;k.TextRenderer=$;k.Lexer=x;k.lexer=x.lex;k.Tokenizer=y;k.Hooks=S;k.parse=k;var at=k.options,lt=k.setOptions,ut=k.use,pt=k.walkTokens,ct=k.parseInline,ht=k,dt=b.parse,kt=x.lex;
+
+if(__exports != exports)module.exports = exports;return module.exports}));
+//# sourceMappingURL=marked.umd.js.map
+
+</script>
+<script>
+(()=>{var T=((h)=>typeof require<"u"?require:typeof Proxy<"u"?new Proxy(h,{get:(_,y)=>(typeof require<"u"?require:_)[y]}):h)(function(h){if(typeof require<"u")return require.apply(this,arguments);throw Error('Dynamic require of "'+h+'" is not supported')});var V="1.0.0",S=new Set(["workflow_start","workflow_end",]);function oh(h){return h.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;")}function Jh(h){return h.replace(/\\/g,"\\\\").replace(/"/g,"\\\"").replace(/\n/g,"\\n").replace(/\r/g,"")}function wh(h){let _=new TextEncoder().encode(h),y="",J=32768;for(let j=0;j<_.length;j+=J)y+=String.fromCharCode(..._.subarray(j,j+J));return btoa(y)}function jh(h,_){let y=wh(h);return`<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>__WORKSPACE__ â€” WorkflowPeople</title>
+<style>
+  :root { color-scheme: light dark; }
+  html, body { height: 100%; margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  body { display: grid; place-items: center; background: #f7f7f8; color: #111; }
+  @media (prefers-color-scheme: dark) { body { background: #111214; color: #f3f3f3; } .card { background: #1b1d20 !important; border-color: #2a2d31 !important; } button.secondary { color: #f3f3f3 !important; border-color: #3a3d42 !important; } }
+  .card { background: #fff; border: 1px solid #e4e4e7; border-radius: 12px; padding: 28px 32px; max-width: 520px; box-shadow: 0 4px 24px rgba(0,0,0,0.04); }
+  h1 { font-size: 20px; margin: 0 0 6px; }
+  .workspace { font-size: 14px; opacity: 0.7; margin: 0 0 20px; }
+  .actions { display: flex; gap: 10px; margin-top: 18px; flex-wrap: wrap; }
+  button { font: inherit; padding: 10px 16px; border-radius: 8px; border: 1px solid #2563eb; background: #2563eb; color: white; cursor: pointer; }
+  button.secondary { background: transparent; color: #2563eb; }
+  button:hover { filter: brightness(1.05); }
+  .status { font-size: 13px; opacity: 0.7; margin-top: 14px; }
+  .footer { font-size: 11px; opacity: 0.5; margin-top: 24px; }
+  code { background: rgba(127,127,127,0.15); padding: 1px 6px; border-radius: 4px; }
+</style>
+</head>
+<body>
+
+<main class="card">
+  <h1>Opening in WorkflowPeople&hellip;</h1>
+  <p class="workspace">Workspace: <strong id="ws">__WORKSPACE__</strong></p>
+
+  <p>This file is a workflow definition. Click below to open it in the WorkflowPeople runner, or download the raw <code>.wfp</code>.</p>
+
+  <div class="actions">
+    <button id="open">Open in WorkflowPeople</button>
+    <button id="download" class="secondary">Download as .wfp</button>
+  </div>
+
+  <p class="status" id="status">Auto-opening in <span id="countdown">3</span>s&hellip;</p>
+
+  <p class="footer">Your workflow data is passed via URL fragment (<code>#wfp=&hellip;</code>) and never sent to any server during the handoff.</p>
+</main>
+
+<script type="application/octet-stream" id="wfp-payload">__PAYLOAD_BASE64__<\/script>
+
+<script>
+(function () {
+  var APP_URL = "__APP_URL__";
+  var FILENAME = "__FILENAME__";
+  var payload = document.getElementById("wfp-payload").textContent.trim();
+
+  function decodePayload() {
+    var bin = atob(payload);
+    var bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new TextDecoder().decode(bytes);
+  }
+
+  function openInApp() {
+    var url = APP_URL + "#wfp=" + encodeURIComponent(payload);
+    window.location.href = url;
+  }
+
+  function downloadRaw() {
+    var json = decodePayload();
+    var blob = new Blob([json], { type: "application/json" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = FILENAME;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 0);
+  }
+
+  document.getElementById("open").addEventListener("click", openInApp);
+  document.getElementById("download").addEventListener("click", downloadRaw);
+
+  var seconds = 3;
+  var cd = document.getElementById("countdown");
+  var status = document.getElementById("status");
+  var timer = setInterval(function () {
+    seconds--;
+    if (seconds <= 0) { clearInterval(timer); openInApp(); return; }
+    cd.textContent = String(seconds);
+  }, 1000);
+  function cancelAuto() { clearInterval(timer); status.style.display = "none"; }
+  ["click", "keydown", "mousemove"].forEach(function (ev) {
+    document.addEventListener(ev, cancelAuto, { once: true });
+  });
+})();
+<\/script>
+</body>
+</html>
+`.replaceAll("__WORKSPACE__",oh(_.workspace)).replaceAll("__FILENAME__",Jh(_.fileName)).replaceAll("__APP_URL__",Jh(_.appUrl)).replaceAll("__PAYLOAD_BASE64__",y)}function Ph(){return window.location.origin+window.location.pathname}var o="wfp-runner.llm-settings.v1";function w(){return typeof window.showOpenFilePicker==="function"}function zh(h,_){let y=JSON.parse(h),J=y?.metadata?.format_version;if(!J)console.warn(`[wfp-runner] ${_}: missing metadata.format_version. Expected "${V}".`);else if(J!==V)console.warn(`[wfp-runner] ${_}: format_version "${J}" â€” this runner targets "${V}".`);return y}async function Kh(){if(w()){let[h]=await window.showOpenFilePicker({types:[{description:"WFP workspace",accept:{"application/json":[".wfp"]}}],multiple:!1}),_=await h.getFile(),y=await _.text();return{file:zh(y,_.name),fileName:_.name,handle:h}}return new Promise((h)=>{let _=document.createElement("input");_.type="file",_.accept=".wfp,application/json",_.onchange=async()=>{let y=_.files?.[0];if(!y)return h(null);let J=await y.text();h({file:zh(J,y.name),fileName:y.name,handle:null})},_.click()})}async function Oh(h,_,y){let J=JSON.stringify(h,null,2);if(y){let b=await y.createWritable();return await b.write(J),await b.close(),y}if(w()){let b=await window.showSaveFilePicker({suggestedName:_,types:[{description:"WFP workspace",accept:{"application/json":[".wfp"]}}]}),O=await b.createWritable();return await O.write(J),await O.close(),b}let j=new Blob([J],{type:"application/json"}),n=URL.createObjectURL(j),K=document.createElement("a");return K.href=n,K.download=_,K.click(),URL.revokeObjectURL(n),null}async function bh(h,_){let y=JSON.stringify(h,null,2),J=_.replace(/\.html$/i,"").replace(/\.wfp$/i,"")||"workspace",j=`${J}.wfp.html`,n=jh(y,{workspace:h.metadata?.workspace||"Untitled workflow",fileName:`${J}.wfp`,appUrl:Ph()});if(w()){let X=await(await window.showSaveFilePicker({suggestedName:j,types:[{description:"WFP wrapper (HTML)",accept:{"text/html":[".html"]}}]})).createWritable();await X.write(n),await X.close();return}let K=new Blob([n],{type:"text/html"}),b=URL.createObjectURL(K),O=document.createElement("a");O.href=b,O.download=j,O.click(),URL.revokeObjectURL(b)}function Uh(){let h=localStorage.getItem(o);if(!h)return null;try{return JSON.parse(h)}catch{return null}}function Xh(h){localStorage.setItem(o,JSON.stringify(h))}function Zh(){localStorage.removeItem(o)}function dh(h){return!!(h&&typeof h==="object"&&("_meta"in h)&&("data"in h)&&typeof h._meta?.type==="string")}function H(h){if(dh(h))return h;if(typeof h==="string")return{_meta:{type:"text",length:h.length},data:h};if(typeof h==="number")return{_meta:{type:"number"},data:h};if(typeof h==="boolean")return{_meta:{type:"boolean"},data:h};if(Array.isArray(h)){let _=h.length>0&&typeof h[0]==="object"&&h[0]!==null?Object.keys(h[0]):void 0;return{_meta:{type:"json_array",rowCount:h.length,columns:_},data:h}}if(h&&typeof h==="object")return{_meta:{type:"json_object"},data:h};return{_meta:{type:"string"},data:String(h??"")}}var ih=new Set(["localhost","0.0.0.0","::","::1"]),ah=[/^10\./,/^127\./,/^169\.254\./,/^192\.168\./,/^172\.(1[6-9]|2\d|3[01])\./],lh=[/^fe80:/i,/^fc/i,/^fd/i];function sh(h){let _=h.toLowerCase().replace(/^\[|\]$/g,"");if(ih.has(_))return!0;if(ah.some((y)=>y.test(_)))return!0;if(lh.some((y)=>y.test(_)))return!0;return!1}async function qh(h,_){let y;try{y=new URL(h)}catch{throw Error(`api.fetch: invalid URL "${h}"`)}if(y.protocol!=="http:"&&y.protocol!=="https:")throw Error(`api.fetch: only http/https are allowed (got "${y.protocol}")`);if(sh(y.hostname))throw Error(`api.fetch: refusing to call a private/loopback host (${y.hostname}). External hosts only.`);let J=(_?.method||"GET").toUpperCase(),j={..._?.headers||{}},n;if(_?.body!==void 0){if(typeof _.body==="string")n=_.body;else if(n=JSON.stringify(_.body),!j["Content-Type"])j["Content-Type"]="application/json"}let K=Math.min(Math.max(0,_?.timeout??30000),60000),b=new AbortController,O=setTimeout(()=>b.abort(),K);try{let U=await fetch(y.toString(),{method:J,headers:j,body:n,signal:b.signal}),X=await eh(U),G=X;try{G=JSON.parse(X)}catch{}let F={};return U.headers.forEach((M,A)=>{F[A]=M}),{status:U.status,headers:F,data:G,text:X}}finally{clearTimeout(O)}}async function eh(h){if(!h.body)return h.text();let _=h.body.getReader(),y=new TextDecoder,J=0,j="";while(!0){let{value:n,done:K}=await _.read();if(K)break;if(J+=n.byteLength,J>5242880){try{await _.cancel()}catch{}throw Error("api.fetch: response exceeded 5242880 bytes")}j+=y.decode(n,{stream:!0})}return j+=y.decode(),j}function Gh(h,_){let y=h.knowledge?.find((J)=>J.name===_);return y?y.content:null}function th(){return`turn-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,7)}`}function h_(h,_){return h?.find((y)=>y.kind==="chat"&&y.workflow_id===_)}function __(h,_){let y=h.role==="user"||h.role==="assistant"||h.role==="system"?h.role:"assistant";return{turn_id:h.id,workflow_id:_,role:y,content:h.markdown??"",timestamp:h.timestamp}}function d(h){let{session:_,file:y,llm:J,toolId:j,nodeLabel:n}=h;return{getParameter(O){return _.parameters[O]?.data},getParameterMeta(O){return _.parameters[O]?._meta},setParameter(O,U){_.parameters[O]=H(U)},async setData(O,U){let X=H(U),G=String(O).trim().toLowerCase().replace(/[^a-z0-9_]/g,"_");if(!G)throw Error("setData: name must contain at least one alphanumeric character");_.parameters[G]=X,_.pendingDataWrites.set(G,X)},addMessage:(O)=>{let X={role:O.voice?"voice":O.role||"tool",source:j,nodeLabel:n,markdown:O.markdown,html:O.html,voice:O.voice,table:O.table,chart:O.chart,form:O.form,json:O.json,data:O.data,timestamp:new Date().toISOString()};if(_.messages.push(X),h.onMessage?.(X),O.voice&&h.speak)h.speak(O.voice)},fetch(O,U){return qh(O,U)},getKnowledge(O){return Gh(y,O)},llm:{async complete(O){if(!J)throw Error("LLM not configured. The runner must supply an LlmClient before calling api.llm.complete.");return J(O)}},getChatHistory(O){let U=h_(y.sessions,_.workflowId),G=[...U?.messages?U.messages.map((F)=>__(F,_.workflowId)):[],..._.pendingChatTurns];if(O&&O>0)return G.slice(-O);return G},appendChat(O){_.pendingChatTurns.push({turn_id:th(),workflow_id:_.workflowId,role:O.role,content:String(O.content??""),timestamp:new Date().toISOString()})},async pauseForInput(O){let U=await h.pauseForInput(O);if(U.kind==="form"&&U.values)for(let[X,G]of Object.entries(U.values))_.parameters[X]=H(G);else if(U.kind==="text"&&typeof U.value==="string")_.parameters.pause_response=H(U.value);return U},ext:h.ext??{}}}function g(h){let _=[],y=y_(h);if(y.length===0)return _;let J=Qh(y[0]);for(let j=1;j<y.length;j++){if(!y[j].trim())continue;let n=Qh(y[j]),K={};for(let b=0;b<J.length;b++)K[J[b]]=n[b]??"";_.push(K)}return _}function y_(h){let _=[],y="",J=!1;for(let j=0;j<h.length;j++){let n=h[j];if(n==='"')J=!J,y+=n;else if((n===`
+`||n==="\r")&&!J){if(n==="\r"&&h[j+1]===`
+`)j++;_.push(y),y=""}else y+=n}if(y.length>0)_.push(y);return _}function Qh(h){let _=[],y="",J=!1;for(let j=0;j<h.length;j++){let n=h[j];if(J)if(n==='"'&&h[j+1]==='"')y+='"',j++;else if(n==='"')J=!1;else y+=n;else if(n==='"')J=!0;else if(n===",")_.push(y),y="";else y+=n}return _.push(y),_}function E(h){let _=h.content;if(typeof _!=="string")return{_meta:{type:"text",length:0},data:""};let y=h.content_type||"text";if(h.content_json!==void 0&&h.content_json!==null)return{_meta:{type:y,rowCount:h.row_count??void 0,columns:h.columns},data:h.content_json};if(y==="csv"||y==="json_array"){let J=g(_);return{_meta:{type:"json_array",rowCount:J.length,columns:J.length>0?Object.keys(J[0]):[]},data:J}}return{_meta:{type:y,length:_.length},data:_}}async function uh(h){h.addMessage({role:"system",markdown:"**Workflow complete.**"})}async function Dh(h){h.addMessage({role:"system",markdown:"**Starting workflow.**"})}function i(h){return S.has(h)}var Fh={workflow_start:Dh,workflow_end:uh};function Mh(h){try{return JSON.parse(h)}catch{return null}}function j_(h){let _=h&&typeof h==="object"?h:{},y=_.id||_.node_id||`node-${Math.random().toString(16).slice(2,8)}`,J=_.label||_.name||"Step",j=typeof _.step_order==="number"?_.step_order:0,n=_.tool_id||"";if(!n&&typeof _.type==="string"&&S.has(_.type))n=_.type;if(!n&&_.config!==void 0){let O=typeof _.config==="string"?Mh(_.config):_.config;if(O&&typeof O==="object"&&typeof O.tool_id==="string")n=O.tool_id}let K="tool";if(n==="workflow_start"||_.type==="start")K="start";else if(n==="workflow_end"||_.type==="end")K="end";else if(_.type==="prompt")K="prompt";let b;if(_.tool_parameters&&typeof _.tool_parameters==="object")b=_.tool_parameters;else if(_.toolParameters&&typeof _.toolParameters==="object")b=_.toolParameters;else if(_.params&&typeof _.params==="object")b=_.params;else if(typeof _.config==="string"){let O=Mh(_.config);if(O&&O.parameters&&typeof O.parameters==="object")b=O.parameters}return{id:y,type:K,label:J,step_order:j,tool_id:n,tool_parameters:b}}function Vh(h){if(!Array.isArray(h.nodes))return[];return h.nodes.map((_)=>j_(_))}var P_=/^\{\{(.+?)\}\}$/;function z_(h){return{_meta:{type:"text",length:h.length},data:h}}function Ah(h,_){if(!h.tool_parameters)return;for(let[y,J]of Object.entries(h.tool_parameters)){if(typeof J!=="string")continue;let j=J.match(P_);if(j){let n=j[1].trim();if(n===y)continue;let K=_.parameters[n];if(K)_.parameters[y]=K}else _.parameters[y]=z_(J)}}function K_(h){return`${h}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,7)}`}function Lh(h,_){let y={};if(h.data)for(let[J,j]of Object.entries(h.data))y[J]=E(j);return{session:null,workflowId:_,parameters:y,messages:[],pendingDataWrites:new Map,pendingChatTurns:[]}}function O_(h,_){if(!h.sessions)h.sessions=[];let y=h.sessions.find((j)=>j.kind==="chat"&&j.workflow_id===_);if(y)return y;let J=new Date().toISOString();return y={id:K_("sess"),name:"Chat",workflow_id:_,kind:"chat",status:"in_progress",messages:[],created_at:J,updated_at:J},h.sessions.push(y),y}function Nh(h,_){if(_.pendingChatTurns.length===0)return;let y=O_(h,_.workflowId),J=y.messages??(y.messages=[]);for(let j of _.pendingChatTurns)J.push(b_(j));y.updated_at=new Date().toISOString(),_.pendingChatTurns=[]}function b_(h){return{id:h.turn_id,role:h.role,timestamp:h.timestamp,markdown:h.content}}function Ch(h,_){if(_.pendingDataWrites.size===0)return;if(!h.data)h.data={};for(let[y,J]of _.pendingDataWrites){let j=h.data[y];h.data[y]=U_(J,j)}_.pendingDataWrites.clear()}function U_(h,_){let y=new Date().toISOString(),J=h._meta,j=h.data;if(J.type==="json_array"||J.type==="json_object")return{content:typeof j==="string"?j:JSON.stringify(j),content_type:J.type,content_json:j,columns:J.columns??_?.columns,row_count:J.rowCount??_?.row_count,source_filename:_?.source_filename??null,loaded_at:_?.loaded_at,edited_at:y};if(J.type==="csv")return{content:typeof j==="string"?j:JSON.stringify(j),content_type:"csv",columns:J.columns??_?.columns,row_count:J.rowCount??_?.row_count,source_filename:_?.source_filename??null,loaded_at:_?.loaded_at,edited_at:y};return{content:typeof j==="string"?j:JSON.stringify(j),content_type:"text",source_filename:_?.source_filename??null,loaded_at:_?.loaded_at,edited_at:y}}async function a(h,_,y){let J=X_(h,_),j=Vh(J).sort((U,X)=>U.step_order-X.step_order),n=Lh(h,_);if(y.initialParameters)for(let[U,X]of Object.entries(y.initialParameters))n.parameters[U]={_meta:{type:"text",length:X.length},data:X};let K=new Map((h.tools||[]).map((U)=>[U.tool_id,U]));for(let U of j){Ah(U,n);let X=d({file:h,session:n,toolId:U.tool_id,nodeLabel:U.label,llm:y.llm,pauseForInput:y.pauseForInput,onMessage:y.onMessage,speak:y.speak,ext:y.ext});try{await Z_(U,K,X)}catch(G){let F=G instanceof Error?G.message:String(G),M={role:"error",source:U.tool_id||"(none)",nodeLabel:U.label,markdown:`**Error in ${U.label}** (${U.tool_id||"no tool_id"}): ${F}`,timestamp:new Date().toISOString()};throw n.messages.push(M),y.onMessage?.(M),G}}let b=n.pendingDataWrites.size>0,O=n.pendingChatTurns.length>0;return Ch(h,n),Nh(h,n),{messages:n.messages,parameters:n.parameters,dataChanged:b,chatChanged:O}}function X_(h,_){let y=h.workflows?.find((J)=>J.id===_);if(!y)throw Error(`Workflow not found: ${_}`);return y}async function Z_(h,_,y){if(!h.tool_id)throw Error(`Node "${h.label}" has no tool_id. Each node must include a "tool_id" field (e.g. "workflow_start" or "ctool-<id>").`);if(i(h.tool_id)){let J=Fh[h.tool_id];await J(y);return}if(h.tool_id.startsWith("ctool-")){let J=_.get(h.tool_id);if(!J)throw Error(`Custom tool not found: ${h.tool_id}`);if(!J.code?.trim())throw Error(`Custom tool has no code: ${h.tool_id}`);await new(Object.getPrototypeOf(async function(){})).constructor("api",J.code)(y);return}y.addMessage({role:"system",markdown:`Skipping unknown tool \`${h.tool_id}\` (\`${h.label}\`). Not implemented in this runner.`})}async function G_(h,_){if(!h.base_url)throw Error("LLM base_url not configured");if(!h.api_key)throw Error("LLM api_key not configured");let J=h.base_url.replace(/\/+$/,"").replace(/\/(chat\/completions|completions|responses|messages)$/,"")+"/chat/completions",j={model:_.model||h.model,messages:_.messages};if(_.temperature!==void 0)j.temperature=_.temperature;if(_.max_tokens!==void 0)j.max_tokens=_.max_tokens;if(_.response_format==="json_object")j.response_format={type:"json_object"};let n={"Content-Type":"application/json",Authorization:`Bearer ${h.api_key}`};if(/(^|\.)anthropic\.com/i.test(new URL(J).hostname))n["anthropic-dangerous-direct-browser-access"]="true";let K=await fetch(J,{method:"POST",headers:n,body:JSON.stringify(j)});if(!K.ok){let X=await K.text();throw Error(`LLM call failed: ${K.status} ${K.statusText} â€” ${X.slice(0,500)}`)}let b=await K.json();return{text:b?.choices?.[0]?.message?.content??"",model:b?.model||j.model,usage:b?.usage}}function Eh(h){if(!h)return null;return(_)=>G_(h,_)}async function xh(h,_,y){return a(h,_,{llm:Eh(y.llmConfig),pauseForInput:y.pauseForInput,initialParameters:y.initialParameters,onMessage:y.onMessage,speak:y.onVoice})}var c="# WFP Tool API Reference\n\nFiles conform to the **.wfp 1.0.0** simplified format. The top-level keys are\n`metadata`, `workflows`, `tools`, `data`, `knowledge`, `sessions`, and\n`extensions`. Any top-level key the runner does not actively manage\n(including unknown extensions) is preserved unchanged on save.\n\nCustom tool code is a JavaScript function body executed by the runner.\nTop-level `await` is allowed. The only available global is `api`. There is\nno `import`, no `require`, no `eval`.\n\n## The `api` surface\n\nThe api is divided into a guaranteed core and an open extension namespace.\nEvery conformant runner provides every Tier 1 and Tier 2 method.\n\n### Tier 1 â€” Core\n\n- `api.getParameter(name)` â†’ the raw value (unwrapped from the typed envelope)\n- `api.getParameterMeta(name)` â†’ `{ type, columns?, rowCount?, length? }`\n- `api.setParameter(name, value)` â€” session-scoped; auto-wraps raw values\n- `await api.setData(name, value)` â€” persists into the workspace's `data`\n  map; survives across runs when the user saves the .wfp\n- `api.addMessage(msg)` â€” append a message to the running session. Body\n  shapes: `markdown`, `html`, `voice`, `table`, `chart`, `form`, `json`,\n  `data`. Runners that don't render a given shape degrade gracefully (a\n  text runner shows `voice` text as a normal log line).\n- `await api.fetch(url, options?)` â†’ `{ status, headers, data, text }`.\n  Options: `{ method?, headers?, body?, timeout? }`. Private / loopback\n  networks are blocked. Timeout is capped at 60 seconds, response body\n  at 5 MB. `data` is JSON-parsed when possible; otherwise it equals `text`.\n\n### Tier 2 â€” Required, universal\n\n- `api.getKnowledge(name)` â†’ string | null â€” returns a knowledge pack's\n  markdown content.\n- `await api.llm.complete({ messages, max_tokens?, response_format? })`\n  â†’ `{ text, model, usage }`. Messages:\n  `[{ role: \"system\" | \"user\" | \"assistant\", content: string }, ...]`.\n  Set `response_format: \"json_object\"` to constrain the model to JSON.\n- `api.getChatHistory(limit?)` â†’ `ChatTurn[]` â€” recent turns from the\n  active chat session, oldest-first. Each turn:\n  `{ turn_id, workflow_id, role, content, timestamp }`. Returns `[]` if\n  the workflow has no chat session yet.\n- `api.appendChat({ role, content })` â€” append a turn to the workflow's\n  chat session. Role: `\"user\" | \"assistant\" | \"system\"`. The session is\n  lazily created if needed and persisted to `sessions[]` on save.\n- `await api.pauseForInput(prompt)` â†’ `PauseResult`. Pauses the workflow\n  and shows a prompt with `markdown`, `html`, or `form`. Resolves with\n  `{ kind: \"text\", value }`, `{ kind: \"form\", values }`, or\n  `{ kind: \"cancelled\" }`. Pause state lives in the session so the run\n  can be resumed.\n\n### Extensions â€” `api.ext.*`\n\nApps may register optional capabilities under `api.ext`. These are NOT\nstandardized â€” they are app-specific. Tool code that depends on an\nextension should use optional chaining so the same `.wfp` opens in any\nrunner:\n\n```js\nconst key = await api.ext?.secrets?.get?.(\"supabase\");\nif (!key) {\n  api.addMessage({ markdown: \"This workflow needs a **supabase** secret.\" });\n  return;\n}\n```\n\nA runner that does not register a given extension leaves the key absent\n(it does not throw). Common extensions observed in production:\n\n- `api.ext.secrets.get(name)` (hosted app) â€” read a named secret from the\n  user's encrypted vault.\n- `api.ext.privacyMap.*` (hosted app) â€” entity-masking layer.\n\n## Workflow node schema\n\n`workflow.nodes` is a real JSON array (not a JSON-encoded string).\nExecution order follows `step_order` (1-based). There is no `edges` field.\n\nEach node has this shape:\n\n```json\n{\n  \"id\": \"node-<6 hex>\",\n  \"type\": \"tool\",\n  \"label\": \"<short human label>\",\n  \"step_order\": <integer, 1-based>,\n  \"tool_id\": \"<the tool to run â€” see below>\",\n  \"tool_parameters\": { \"<param_name>\": \"<literal value or {{variable_name}}>\" }\n}\n```\n\n`tool_id` is REQUIRED. `type` is a UI hint only â€” runners dispatch by\n`tool_id`, not `type`.\n\n## Reserved built-in tool IDs\n\n| Tool ID           | Purpose                                                                                                                       |\n| ----------------- | ----------------------------------------------------------------------------------------------------------------------------- |\n| `workflow_start`  | Required first node of every workflow. `type: \"start\"`. `tool_parameters`: `{}`.                                              |\n| `workflow_end`    | Required last node of every workflow. `type: \"end\"`. `tool_parameters`: `{}`.                                                 |\n\nCustom tools authored by users MUST use the `ctool-*` prefix and appear in\nthe file's `tools[]` array.\n\n`tool_parameters` values like `\"{{green_capital_holdings}}\"` mean \"use the\nvalue of the parameter named `green_capital_holdings`\" (set by `data`, a\nprevious tool's output, or `api.setParameter`).\n\n## Custom tool schema\n\n`tools[]` entries have this shape:\n\n```json\n{\n  \"tool_id\": \"ctool-<6 hex>\",\n  \"name\": \"<short name>\",\n  \"description\": \"<short plain-text description>\",\n  \"api_version\": \"1.0.0\",\n  \"inputs\":  [{ \"name\": \"<param>\", \"type\": \"string|number|boolean|object|array|filepath\", \"required\": false, \"description\": \"...\" }],\n  \"outputs\": [{ \"name\": \"<param>\", \"type\": \"string|number|boolean|object|array\", \"description\": \"...\" }],\n  \"code\": \"// function body, no wrapper\"\n}\n```\n\n## Knowledge pack schema\n\n`knowledge[]` entries have this shape:\n\n```json\n{\n  \"name\": \"<unique-name>\",\n  \"scope\": \"chat\" | \"workflow\" | \"chat+workflow\" | \"privacy-map\",\n  \"tags\": [\"<tag>\"],\n  \"content\": \"# Markdown content...\"\n}\n```\n\n`scope` is REQUIRED. Default for general packs: `\"chat+workflow\"`.\n\n## Conventions for tool code\n\n- Read inputs at the top: `const x = api.getParameter(\"input_name\");`\n- Write outputs near the end: `api.setParameter(\"output_name\", result);`\n- The next workflow node reads outputs by parameter name.\n- CSV-derived data is an array of row objects â€” column values are strings.\n  Use `parseFloat()` / `parseInt()` before math.\n- Always call `api.addMessage(...)` at least once â€” silent tools confuse users.\n\n## Example: classify rows with `api.llm.complete`\n\nClassification is a tool-code pattern, not a built-in helper. Use\n`api.llm.complete` with `response_format: \"json_object\"` and parse the\nresult.\n\n```js\nconst transactions = api.getParameter(\"bank_statement\");\nconst accounts = api.getParameter(\"chart_of_accounts\");\n\nconst result = await api.llm.complete({\n  messages: [\n    {\n      role: \"system\",\n      content:\n        \"Classify each bank transaction into the best matching account. \" +\n        'Return strict JSON: { \"data\": [<input rows with an \\\"account\\\" field added>] }',\n    },\n    {\n      role: \"user\",\n      content:\n        `Accounts: ${accounts.map(a => a.name).join(\", \")}\\n\\n` +\n        `Transactions:\\n${JSON.stringify(transactions, null, 2)}`,\n    },\n  ],\n  response_format: \"json_object\",\n  max_tokens: 16384,\n});\n\nconst parsed = JSON.parse(result.text);\napi.setParameter(\"categorized_transactions\", parsed.data);\napi.addMessage({\n  markdown: `Categorized ${parsed.data.length} transactions into ${accounts.length} accounts.`,\n});\n```\n\n## Example: voice + chat turn\n\n```js\nconst transcript = (api.getParameter(\"voice_input\") || \"\").trim();\nif (!transcript) {\n  api.addMessage({ voice: \"I didn't catch that. Could you say it again?\" });\n  return;\n}\n\nconst history = api.getChatHistory(10);\nconst base = api.getKnowledge(\"caregiver-system\") || \"You are a warm caregiver companion.\";\nconst messages = [\n  { role: \"system\", content: base },\n  ...history.map(t => ({ role: t.role === \"user\" ? \"user\" : \"assistant\", content: t.content })),\n  { role: \"user\", content: transcript },\n];\n\nconst result = await api.llm.complete({ messages, max_tokens: 250 });\nconst spoken = (result.text || \"\").trim() || \"Got it.\";\n\napi.appendChat({ role: \"user\", content: transcript });\napi.appendChat({ role: \"assistant\", content: spoken });\napi.addMessage({ voice: spoken });\n```\n";function Q_(){let h=window;return h.SpeechRecognition||h.webkitSpeechRecognition||null}function Sh(h){let _=Q_(),y="idle",J=(h.wakeWord||"computer").toLowerCase(),j=h.voicePref,n=null,K=!1,b=null,O=null;function U(q){y=q,h.onStateChange?.(q)}function X(){if(!O)O=new AudioContext;if(O.state==="suspended")O.resume();return O}function G(q,Y,Q=0.05){try{let B=X(),u=B.createOscillator(),I=B.createGain();u.frequency.value=q,u.connect(I),I.connect(B.destination),I.gain.setValueAtTime(Q,B.currentTime),I.gain.exponentialRampToValueAtTime(0.0001,B.currentTime+Y/1000),u.start(),u.stop(B.currentTime+Y/1000)}catch{}}function F(){if(typeof speechSynthesis>"u")return[];return speechSynthesis.getVoices()}function M(){if(typeof speechSynthesis>"u")return null;let q=speechSynthesis.getVoices();if(q.length===0)return null;if(j){let Q=q.find((B)=>B.name===j);if(Q)return Q}let Y=[/Microsoft Ava.*Neural/i,/Microsoft Aria.*Natural/i,/Microsoft Jenny.*Natural/i,/Microsoft Andrew.*Neural/i,/Google US English/i,/Samantha/i,/Karen|Moira|Tessa/i];for(let Q of Y){let B=q.find((u)=>Q.test(u.name));if(B)return B}return q.find((Q)=>Q.lang?.startsWith("en"))||q[0]}function A(q){if(typeof speechSynthesis>"u")return Promise.resolve();return new Promise((Y)=>{let Q=new SpeechSynthesisUtterance(q),B=M();if(B)Q.voice=B;Q.rate=1,Q.pitch=1,Q.volume=1;let u=()=>{window.setTimeout(()=>{if(!speechSynthesis.speaking&&y==="speaking")U("idle")},50)};Q.onend=()=>{Y(),u()},Q.onerror=()=>{Y(),u()},U("speaking"),speechSynthesis.speak(Q)})}function rh(){if(!_){U("error");return}n=new _,n.lang="en-US",n.continuous=!1,n.interimResults=!1,n.maxAlternatives=1,n.onresult=async(q)=>{let Y=q?.results?.[0]?.[0]?.transcript||"",Q=Y.trim().toLowerCase();if(!Q)return;if(y==="idle"){if(Q.includes(J)){G(880,120),U("wake");let B=Q.indexOf(J),u=Q.slice(B+J.length).trim();if(u.length>=2){await nh(u);return}if(b!=null)window.clearTimeout(b);b=window.setTimeout(()=>{if(y==="wake")U("idle")},8000)}}else if(y==="wake"){if(b!=null)window.clearTimeout(b),b=null;await nh(Y)}},n.onerror=(q)=>{let Y=q?.error;if(Y==="not-allowed"||Y==="service-not-allowed"){U("error"),K=!1;return}},n.onend=()=>{if(!K)return;if(y==="speaking"){let q=setInterval(()=>{if(y!=="speaking"){if(clearInterval(q),K)r()}},250);return}r()},r()}function r(){if(!n)return;try{n.start()}catch{}}async function nh(q){U("processing"),G(660,80);try{await h.onTranscript(q)}catch(Y){console.error("voice.onTranscript error:",Y)}if(y==="speaking")await new Promise((Y)=>{let Q=setInterval(()=>{if(typeof speechSynthesis>"u"||!speechSynthesis.speaking)clearInterval(Q),Y()},150)});U("idle")}return{start(){if(K)return;K=!0;try{X()}catch{}rh(),U("idle")},stop(){K=!1;try{n?.abort()}catch{}n=null,U("idle")},isAvailable(){return!!_&&typeof speechSynthesis<"u"},speak:A,state:()=>y,setWakeWord(q){J=(q||"computer").toLowerCase()},setVoicePref(q){j=q},listVoices:F}}var Hh=200,P={file:null,fileName:"",fileHandle:null,llmConfig:Uh(),voice:null,voiceStarted:!1},z=(h)=>{let _=document.getElementById(h);if(!_)throw Error(`Missing element: ${h}`);return _};function Ih(h){if(typeof marked<"u")try{return marked.parse(h)}catch{}return`<pre>${Z(h)}</pre>`}function Z(h){if(h==null)return"";return String(h).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;")}function Y_(){if(!P.file)return{};if(!P.file.extensions)P.file.extensions={};if(!P.file.extensions.app)P.file.extensions.app={};return P.file.extensions.app}function R(){if(!P.file){z("workspace-name").textContent="No file open",z("file-name").textContent="",z("btn-save").disabled=!0,z("btn-new-workflow").disabled=!0,z("btn-add-data").disabled=!0,z("btn-add-pack").disabled=!0,z("workflow-list").innerHTML='<li class="empty">Open a .wfp file or start a new workspace.</li>',z("data-list").innerHTML="",z("knowledge-list").innerHTML="",W();return}z("workspace-name").textContent=P.file.metadata?.workspace||"(unnamed)",z("file-name").textContent=P.fileName?`(${P.fileName})`:"(unsaved)",z("btn-save").disabled=!1,z("btn-new-workflow").disabled=!1,z("btn-add-data").disabled=!1,z("btn-add-pack").disabled=!1;let h=P.file.extensions?.app?.voice_workflow_id||"",_=z("workflow-list"),y=P.file.workflows||[];if(y.length===0)_.innerHTML='<li class="empty">No workflows.</li>';else _.innerHTML=y.map((O)=>{let X=O.id===h?' <span class="voice-tag" title="Voice workflow">\uD83C\uDF99</span>':"";return`
+          <li>
+            <span class="name clickable" data-modify-id="${Z(O.id)}" title="${Z(O.description||"Click to modify")}">${Z(O.name)}${X}</span>
+            <button class="run" data-run-id="${Z(O.id)}">Run</button>
+          </li>`}).join("");let J=z("data-list"),j=P.file.data||{},n=Object.entries(j);J.innerHTML=n.length===0?'<li class="empty">None.</li>':n.map(([O])=>`<li><span class="name clickable" data-data-name="${Z(O)}" title="Click to edit">${Z(O)}</span></li>`).join(""),J.querySelectorAll("[data-data-name]").forEach((O)=>{O.addEventListener("click",()=>e_(O.dataset.dataName))});let K=z("knowledge-list"),b=P.file.knowledge||[];K.innerHTML=b.length===0?'<li class="empty">None.</li>':b.map((O)=>`<li>
+            <span class="name clickable" data-pack-name="${Z(O.name)}" title="${Z((O.tags||[]).join(", "))||"Click to edit"}">${Z(O.name)}</span>
+            <span class="meta">${Z(O.scope||"")}</span>
+          </li>`).join(""),K.querySelectorAll("[data-pack-name]").forEach((O)=>{O.addEventListener("click",()=>ny(O.dataset.packName))}),_.querySelectorAll("[data-modify-id]").forEach((O)=>{O.addEventListener("click",()=>$h(O.dataset.modifyId))}),_.querySelectorAll("button[data-run-id]").forEach((O)=>{O.addEventListener("click",(U)=>{U.stopPropagation(),mh(O.dataset.runId)})}),W()}function Wh(h){if(!h)return"";try{return new Date(h).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"})}catch{return""}}function B_(h){if(h.role==="user")return"You";if(h.role==="voice"){let _=P.file?.extensions?.app?.wake_word||"computer";return _.charAt(0).toUpperCase()+_.slice(1)}return h.nodeLabel||h.source}function N(h){let _=z("log");if(_.querySelector(".placeholder")?.remove(),h.json&&typeof h.json==="object"&&h.json.kind==="wfp:download"){let j=h.json,n=j.filename||"download.txt",K=j.content||"",b=n.endsWith(".html")?"text/html":n.endsWith(".json")?"application/json":n.endsWith(".csv")?"text/csv":"text/plain",O=new Blob([K],{type:b}),U=URL.createObjectURL(O),X=document.createElement("div");X.className="log-entry tool report",X.innerHTML=`
+      <div class="head">
+        <span class="label">${Z(j.label||"Download")}</span>
+        <span class="source">${Z(n)} Â· ${K.length.toLocaleString()} chars</span>
+        <span class="time">${Z(Wh(h.timestamp))}</span>
+      </div>
+      <div class="body">
+        <div class="report-actions">
+          <a class="btn-action primary" href="${U}" download="${Z(n)}">Download</a>
+          <a class="btn-action secondary" href="${U}" target="_blank" rel="noopener">Open in new tab</a>
+        </div>
+      </div>
+    `,_.appendChild(X),_.scrollTop=_.scrollHeight;return}let y=document.createElement("div");y.className=`log-entry ${h.role}`;let J="";if(h.voice)J=`<div class="voice-line"><span class="voice-icon">${h.role==="user"?"\uD83C\uDFA4":"\uD83D\uDD0A"}</span> ${Z(h.voice)}</div>`;else if(h.html)J=h.html;else if(h.markdown)J=Ih(h.markdown);if(y.innerHTML=`
+    <div class="head">
+      <span class="label">${Z(B_(h))}</span>
+      <span class="source">${Z(h.source)}</span>
+      <span class="time">${Z(Wh(h.timestamp))}</span>
+    </div>
+    <div class="body">${J}</div>
+  `,h.role==="error"&&h.markdown?.includes("LLM not configured")){let j=document.createElement("button");j.textContent="Open LLM Settings",j.className="btn-action primary",j.style.marginTop="8px",j.addEventListener("click",fh),y.querySelector(".body")?.appendChild(j)}_.appendChild(y),_.scrollTop=_.scrollHeight}function vh(h){let _=z("log");_.querySelector(".placeholder")?.remove();let y=document.createElement("div");y.className="log-divider",y.textContent=h,_.appendChild(y)}function f(){z("log").innerHTML='<div class="placeholder">Workflow output will appear here.</div>'}function gh(h){return`pause-field-${h.replace(/[^A-Za-z0-9_-]/g,"_")}`}function R_(h){let _=gh(h.name),y=h.required?" required":"",J=h.required?' <span style="color:#b91c1c;" title="required">*</span>':"",j=`${Z(h.label||h.name)}${J}`,n=h.description?`<small class="muted" style="display:block;margin-top:2px;">${Z(h.description)}</small>`:"",K=h.value!==void 0&&h.value!==null?String(h.value):"";switch(h.type){case"textarea":return`
+        <label style="display:block;margin-top:12px;">${j}
+          <textarea id="${_}" class="text-area-short" spellcheck="false"${y}>${Z(K)}</textarea>
+        </label>${n}`;case"number":return`
+        <label style="display:block;margin-top:12px;">${j}
+          <input id="${_}" type="number" value="${Z(K)}"${y} />
+        </label>${n}`;case"date":return`
+        <label style="display:block;margin-top:12px;">${j}
+          <input id="${_}" type="date" value="${Z(K)}"${y} />
+        </label>${n}`;case"boolean":{let b=h.value===!0||h.value==="true"?" checked":"";return`
+        <label style="display:flex;align-items:center;gap:8px;margin-top:12px;">
+          <input id="${_}" type="checkbox"${b} />
+          <span>${j}</span>
+        </label>${n}`}case"select":{let b=(h.options||[]).map((U)=>{let X=String(U.value)===K?" selected":"";return`<option value="${Z(String(U.value))}"${X}>${Z(U.label)}</option>`}).join(""),O=h.required?"":'<option value="">â€” select â€”</option>';return`
+        <label style="display:block;margin-top:12px;">${j}
+          <select id="${_}"${y}>${O}${b}</select>
+        </label>${n}`}case"text":default:return`
+        <label style="display:block;margin-top:12px;">${j}
+          <input id="${_}" type="text" value="${Z(K)}"${y} />
+        </label>${n}`}}function u_(h){let _={};for(let y of h){let J=document.getElementById(gh(y.name));if(!J)continue;let j;if(y.type==="boolean")j=J.checked;else if(y.type==="number"){let n=J.value;if(n===""){if(y.required)return{ok:!1,error:`"${y.label||y.name}" is required.`};continue}let K=Number(n);if(Number.isNaN(K))return{ok:!1,error:`"${y.label||y.name}" must be a number.`};j=K}else{let n=J.value;if(y.required&&!n.trim())return{ok:!1,error:`"${y.label||y.name}" is required.`};j=n}_[y.name]=j}return{ok:!0,values:_}}function D_(h){return new Promise((_)=>{let y=z("pause-prompt"),J=z("pause-input"),j=z("pause-text-wrap"),n=z("pause-form-fields"),K=z("pause-validation");if(K.textContent="",h.html)y.innerHTML=h.html;else if(h.markdown)y.innerHTML=Ih(h.markdown);else if(!h.form)y.innerHTML="<p>Provide input to continue.</p>";else y.innerHTML="";let b=h.form?.fields||[],O=b.length>0;if(O)n.innerHTML=b.map(R_).join(""),n.classList.remove("hidden"),j.classList.add("hidden");else n.innerHTML="",n.classList.add("hidden"),j.classList.remove("hidden"),J.value="";let U=z("btn-pause-continue"),X=z("btn-pause-cancel"),G=()=>{U.removeEventListener("click",F),X.removeEventListener("click",M),z("pause-modal").classList.add("hidden")},F=()=>{if(O){let A=u_(b);if(!A.ok){K.textContent=A.error;return}G(),_({kind:"form",values:A.values})}else G(),_({kind:"text",value:J.value})},M=()=>{G(),_({kind:"cancelled"})};if(U.addEventListener("click",F),X.addEventListener("click",M),z("pause-modal").classList.remove("hidden"),O)n.querySelector("input,textarea,select")?.focus();else J.focus()})}function kh(){if(!P.file?.sessions?.length)return;let h=[];for(let J of P.file.sessions){if(J.kind!=="chat"||!J.messages)continue;for(let j of J.messages)h.push({role:j.role,markdown:j.markdown,html:j.html,timestamp:j.timestamp})}if(h.length===0)return;h.sort((J,j)=>J.timestamp.localeCompare(j.timestamp));let _=h.slice(-100),y=!!P.file.extensions?.app?.voice_workflow_id;vh("Previous conversation");for(let J of _)if(J.role==="user"||J.role==="assistant")if(y)N({role:J.role==="user"?"user":"voice",source:"history",voice:J.markdown??"",timestamp:J.timestamp});else N({role:J.role==="user"?"user":"system",source:"history",markdown:J.markdown,html:J.html,timestamp:J.timestamp});else{let j=J.role==="tool"?"tool":J.role==="error"?"error":"system";N({role:j,source:"history",html:J.html,markdown:J.markdown,timestamp:J.timestamp})}vh("Now")}function F_(h){if(h.role!=="system")return!1;if(h.source==="workflow_start"||h.source==="workflow_end")return!0;return!1}async function M_(){try{let h=await Kh();if(!h)return;P.file=h.file,P.fileName=h.fileName,P.fileHandle=h.handle;let _=P.file.extensions?.app;if(P.voice&&_?.wake_word)P.voice.setWakeWord(_.wake_word);if(P.voice&&_?.tts_voice)P.voice.setVoicePref(_.tts_voice);f(),R(),kh()}catch(h){if(h.name==="AbortError")return;alert(`Failed to open file: ${h.message}`)}}function l(h){return h.replace(/\.wfp\.html$/i,"").replace(/\.html$/i,"").replace(/\.wfp$/i,"")}function V_(h){if(!P.file)return;let _=P.file.metadata?.workspace||"",y=l(P.fileName||"")||_.toLowerCase().replace(/[^a-z0-9]+/g,"_").replace(/^_+|_+$/g,"")||"workspace";z("save-workspace").value=_,z("save-filename").value=y,z("save-format").value=h,z("save-modal").classList.remove("hidden"),z("save-workspace").focus()}function ch(){z("save-modal").classList.add("hidden")}async function A_(){if(!P.file)return;let h=z("save-workspace").value.trim(),_=l(z("save-filename").value.trim())||"workspace",y=z("save-format").value;if(h)if(!P.file.metadata)P.file.metadata={format_version:V,workspace:h,exported_at:new Date().toISOString()};else P.file.metadata.workspace=h;try{if(y==="html")await bh(P.file,`${_}.wfp.html`),P.fileName=`${_}.wfp.html`,P.fileHandle=null;else{let j=P.fileHandle&&l(P.fileName)===_&&!/\.html$/i.test(P.fileName)?P.fileHandle:null,n=await Oh(P.file,`${_}.wfp`,j);if(n)P.fileHandle=n,P.fileName=n.name||`${_}.wfp`;else if(P.fileName=`${_}.wfp`,!j)P.fileHandle=null}ch(),R()}catch(J){if(J.name==="AbortError")return;alert(`Failed to save: ${J.message}`)}}function ph(){V_("wfp")}function L_(){let h=(window.location.hash||"").match(/[#&]wfp=([^&]+)/);if(!h)return null;try{let _=decodeURIComponent(h[1]),y=atob(_),J=new Uint8Array(y.length);for(let b=0;b<y.length;b++)J[b]=y.charCodeAt(b);let j=new TextDecoder().decode(J),n=JSON.parse(j);history.replaceState(null,"",window.location.pathname+window.location.search);let K=(n.metadata?.workspace||"shared")+".wfp";return{file:n,fileName:K}}catch(_){return console.warn("[wfp-runner] failed to import workflow from URL fragment:",_),null}}function N_(){if(P.file){if(!confirm("Discard the current workspace and start a new one? Unsaved changes will be lost."))return}P.file={metadata:{format_version:V,workspace:"Untitled",exported_at:new Date().toISOString()},workflows:[]},P.fileName="",P.fileHandle=null,f(),R()}var C_=new Set(["workflow_start","workflow_end"]);function T_(h,_){if(!P.file)return;if(_.messages.length===0)return;if(!P.file.sessions)P.file.sessions=[];let y=P.file.sessions.find((n)=>n.kind==="chat"&&n.workflow_id===h),J=new Date().toISOString();if(!y)y={id:`sess-chat-${h}-${Date.now().toString(36)}`,workflow_id:h,kind:"chat",status:"in_progress",created_at:J,updated_at:J,messages:[]},P.file.sessions.push(y);if(!y.messages)y.messages=[];let j=0;for(let n of _.messages){if(n.role==="voice"||n.role==="user")continue;if(n.role==="system"&&C_.has(n.source))continue;y.messages.push({id:`msg-${Date.now().toString(36)}-${j++}-${Math.random().toString(36).slice(2,5)}`,role:n.role,timestamp:n.timestamp,...n.html?{html:n.html}:{},...n.markdown?{markdown:n.markdown}:{},...n.source&&n.source.startsWith("ctool-")?{tool_id:n.source}:{},...n.nodeLabel?{node_label:n.nodeLabel}:{}})}if(y.messages.sort((n,K)=>n.timestamp.localeCompare(K.timestamp)),y.messages.length>Hh)y.messages=y.messages.slice(-Hh);y.updated_at=J}async function mh(h,_,y){if(!P.file)return;if(!y?.preserveLog)f();let J=P.file.workflows?.find((n)=>n.id===h);z("output-title").textContent=y?.preserveLog?"Conversation":`Output â€” ${J?.name||h}`;let j=y?.quietSystem?(n)=>{if(!F_(n))N(n)}:N;try{let n=await xh(P.file,h,{llmConfig:P.llmConfig,initialParameters:_,onMessage:j,onVoice:(K)=>P.voice?.speak(K),pauseForInput:D_});if(T_(h,n),n.dataChanged||n.chatChanged||n.messages.length>0)R()}catch(n){N({role:"error",source:"runner",markdown:`Workflow failed: ${n.message}`,timestamp:new Date().toISOString()})}}function W(){let h=z("mic-widget");if(!P.voice?.isAvailable()){h.classList.add("hidden");return}h.classList.remove("hidden");let y=!!P.file,J=!!P.file?.extensions?.app?.voice_workflow_id,j=!!P.llmConfig;if(!y){h.classList.add("unsupported"),h.title="Open a .wfp to enable voice.";return}if(!J){h.classList.add("unsupported"),h.title="Pick a Voice workflow in Settings to enable voice.";return}if(!j){h.classList.add("unsupported"),h.title="Configure the LLM in Settings.";return}h.classList.remove("unsupported"),h.title=P.voiceStarted?`Voice is on â€” say "${P.file?.extensions?.app?.wake_word||"computer"}" to activate. Click to turn off.`:"Click to start the voice loop."}function m(h){let _=z("mic-widget");if(!P.voiceStarted){_.dataset.state="off",z("mic-label").textContent="Voice off";return}_.dataset.state=h;let y={idle:"Listening",wake:"Go ahead",processing:"Thinking",speaking:"Speaking",error:"Mic error"};z("mic-label").textContent=y[h]??h}function E_(){if(!P.voice)return;if(z("mic-widget").classList.contains("unsupported"))return;if(!P.voiceStarted)P.voice.start(),P.voiceStarted=!0,m("idle");else P.voice.stop(),P.voiceStarted=!1,m("idle");W()}async function x_(h){let _=h.trim();if(!_)return;let y=P.file?.extensions?.app?.voice_workflow_id;if(!y){P.voice?.speak("No voice workflow is set. Pick one in Settings.");return}if(!P.llmConfig){P.voice?.speak("Please configure the LLM in settings.");return}N({role:"user",source:"voice",voice:_,timestamp:new Date().toISOString()}),await mh(y,{voice_input:_},{preserveLog:!0,quietSystem:!0})}function S_(){let h=P.file?.extensions?.app,_=Sh({wakeWord:h?.wake_word||"computer",voicePref:h?.tts_voice,onTranscript:x_,onStateChange:m});if(P.voice=_,m("idle"),W(),typeof speechSynthesis<"u")speechSynthesis.addEventListener("voiceschanged",()=>{let y=P.file?.extensions?.app?.tts_voice;if(y)_.setVoicePref(y)})}function H_(){let h=z("cfg-tts-voice"),_=P.file?.extensions?.app?.tts_voice||"",y=P.voice?.listVoices()||[],J=['<option value="">(auto â€” pick best available)</option>'];for(let j of y){let n=j.name===_?" selected":"";J.push(`<option value="${Z(j.name)}"${n}>${Z(j.name)} â€” ${Z(j.lang)}</option>`)}h.innerHTML=J.join("")}function W_(){let h=z("cfg-voice-workflow"),_=P.file?.workflows||[],y=P.file?.extensions?.app?.voice_workflow_id||"",J=['<option value="">(none â€” voice off)</option>'];for(let j of _){let n=j.id===y?" selected":"";J.push(`<option value="${Z(j.id)}"${n}>${Z(j.name)}</option>`)}h.innerHTML=J.join(""),h.disabled=!P.file,z("cfg-wake-word").disabled=!P.file,z("cfg-tts-voice").disabled=!P.file}function fh(){z("cfg-base-url").value=P.llmConfig?.base_url||"",z("cfg-api-key").value=P.llmConfig?.api_key||"",z("cfg-model").value=P.llmConfig?.model||"",z("cfg-provider-label").value=P.llmConfig?.provider_label||"",z("cfg-wake-word").value=P.file?.extensions?.app?.wake_word||"computer",H_(),W_(),z("settings-modal").classList.remove("hidden")}function e(){z("settings-modal").classList.add("hidden")}function v_(){let h={base_url:z("cfg-base-url").value.trim(),api_key:z("cfg-api-key").value.trim(),model:z("cfg-model").value.trim(),provider_label:z("cfg-provider-label").value.trim()||void 0};if(Xh(h),P.llmConfig=h,P.file){let _=z("cfg-wake-word").value.trim()||"computer",y=z("cfg-tts-voice").value||"",J=z("cfg-voice-workflow").value||"",j=Y_();if(j.wake_word=_,j.tts_voice=y||void 0,J)j.voice_workflow_id=J;else delete j.voice_workflow_id;P.voice?.setWakeWord(_),P.voice?.setVoicePref(y||void 0)}e(),R()}function I_(){Zh(),P.llmConfig=null,e(),W()}var x=null;function t(){x=null,z("tool-modal").classList.add("hidden")}function g_(){if(!x||!P.file?.tools)return;let h=P.file.tools.find((_)=>_.tool_id===x);if(!h)return;h.name=z("tool-modal-name").value.trim()||h.tool_id,h.description=z("tool-modal-description").value,h.code=z("tool-modal-code").value,t(),R()}function k_(){if(!x||!P.file?.tools)return;let h=P.file.tools.find((_)=>_.tool_id===x);if(!h)return;if(!confirm(`Delete tool "${h.name}" (${h.tool_id})? This cannot be undone unless you reopen the .wfp without saving.`))return;P.file.tools=P.file.tools.filter((_)=>_.tool_id!==x),t(),R()}var D=null;function s(h){let _=new Set;if(!Array.isArray(h.nodes))return _;for(let y of h.nodes)if(y.tool_id&&typeof y.tool_id==="string")_.add(y.tool_id);return _}function c_(h){let _=new Map;if(!P.file?.workflows)return _;let y=P.file.workflows.find((n)=>n.id===h);if(!y)return _;let J=s(y),j=new Set((P.file.tools||[]).map((n)=>n.tool_id));for(let n of J){if(!j.has(n))continue;let K=[];for(let b of P.file.workflows){if(b.id===h)continue;if(s(b).has(n))K.push(b.name)}if(K.length>0)_.set(n,K)}return _}function hh(h){return(!Array.isArray(h.nodes)||h.nodes.length===0)&&!h.description}function $h(h){if(!P.file?.workflows)return;let _=P.file.workflows.find((n)=>n.id===h);if(!_)return;D=h;let y=hh(_);if(z("modify-modal-title").textContent=y?"Create new workflow":`Modify workflow: ${_.name}`,y)z("btn-modify-delete").classList.add("hidden-row");else z("btn-modify-delete").classList.remove("hidden-row");z("modify-request").value="",z("modify-response").value="",z("modify-copy-status").textContent="",z("modify-apply-status").textContent="";let J=c_(h),j=z("modify-shared-warning");if(J.size>0){let n=new Map((P.file.tools||[]).map((b)=>[b.tool_id,b.name])),K=[];for(let[b,O]of J){let U=n.get(b)||b;K.push(`<li><b>${Z(U)}</b> â€” also used by: ${Z(O.join(", "))}</li>`)}j.innerHTML=`<b>Heads up:</b> this workflow shares tools with other workflows. Changes to these tools will affect them too.<ul>${K.join("")}</ul>`,j.classList.remove("hidden")}else j.classList.add("hidden");z("modify-modal").classList.remove("hidden")}function p_(){if(D&&P.file?.workflows){let h=P.file.workflows.find((_)=>_.id===D);if(h&&hh(h))P.file.workflows=P.file.workflows.filter((_)=>_.id!==D),R()}D=null,z("modify-modal").classList.add("hidden")}function m_(){if(!D||!P.file?.workflows)return;let h=P.file.workflows.find((y)=>y.id===D);if(!h)return;if(!confirm(`Delete workflow "${h.name}"? This cannot be undone unless you reopen the .wfp without saving.`))return;P.file.workflows=P.file.workflows.filter((y)=>y.id!==D);let _=P.file.extensions?.app;if(_?.voice_workflow_id===D)delete _.voice_workflow_id;D=null,z("modify-modal").classList.add("hidden"),R()}function f_(){if(!P.file)return;if(!P.file.workflows)P.file.workflows=[];let _=`wf-${Array.from(crypto.getRandomValues(new Uint8Array(3))).map((y)=>y.toString(16).padStart(2,"0")).join("")}`;P.file.workflows.push({id:_,name:"New Workflow",description:"",nodes:[]}),R(),$h(_)}function $_(){if(!P.file?.data)return"(none)";let h=[];for(let[_,y]of Object.entries(P.file.data)){let J=E(y),j=J._meta.rowCount!==void 0?` (${J._meta.rowCount} rows)`:"",n=J._meta.columns?`
+  columns: ${J._meta.columns.join(", ")}`:"",K=Array.isArray(J.data)&&J.data.length>0?`
+  first 3 rows: ${JSON.stringify(J.data.slice(0,3))}`:typeof J.data==="string"&&J.data.length>0?`
+  first 500 chars: ${JSON.stringify(J.data.slice(0,500))}`:"";h.push(`### ${_}${j}${n}${K}`)}return h.join(`
+
+`)}function r_(h,_){if(!P.file)return"";let y=P.file.workflows?.find((b)=>b.id===h);if(!y)return"";let J=s(y),j=(P.file.tools||[]).filter((b)=>J.has(b.tool_id)),n=[];if(hh(y))n.push("You are creating a NEW workflow from scratch in a WFP (Workflow People) workspace."),n.push(`The workflow currently has no nodes and no custom tools. Design the steps, write the tool code, and wire them together. Return ONLY a JSON object.
+`);else n.push("You are modifying a single workflow in a WFP (Workflow People) workspace."),n.push(`You will be given the workflow, the custom tools it uses, and supporting context. Apply the user's change request and return ONLY a JSON object.
+`);return n.push("# USER REQUEST"),n.push(_.trim()||"(no request â€” describe one and re-copy)"),n.push(""),n.push(`# THE WORKFLOW TO MODIFY
+`),n.push("```json"),n.push(JSON.stringify(y,null,2)),n.push("```\n"),n.push("Note: `nodes` is a real JSON array. Execution order follows `step_order` (1-based). There is no `edges` field.\n"),n.push("# CUSTOM TOOLS USED BY THIS WORKFLOW"),n.push(`(Only the tools this workflow references â€” other tools in the workspace are not shown.)
+`),n.push("```json"),n.push(JSON.stringify(j,null,2)),n.push("```\n"),n.push("# KNOWLEDGE PACKS (read via `api.getKnowledge(name)`)"),n.push("```json"),n.push(JSON.stringify(P.file.knowledge||[],null,2)),n.push("```\n"),n.push("# data (READ-ONLY â€” sampled to first 3 rows)"),n.push($_()),n.push(""),n.push(c),n.push(""),n.push(`# OUTPUT FORMAT â€” STRICT
+`),n.push("Return ONLY a single JSON object wrapped in a ```json code block. No other text.\n"),n.push("Shape:"),n.push("```json"),n.push(`{
+  "workflows": [
+    { "id": "${y.id}", "<changed field>": ... }
+  ],
+  "tools": [
+    { "tool_id": "<existing or new>", "<changed field>": ... }
+  ],
+  "knowledge": [
+    { "name": "<existing or new>", "<changed field>": ... }
+  ]
+}`),n.push("```\n"),n.push("Rules:"),n.push("- Include ONLY items that changed. Don't echo unchanged items."),n.push("- For changed items, include the primary key (`id` / `tool_id` / `name`) plus only the fields you changed."),n.push("- Omit any top-level array that has no changes (e.g. if no tools changed, omit `tools` entirely)."),n.push(`- The workflow being modified is \`${y.id}\`. Only modify that workflow.`),n.push("- To add a new tool: use a new `tool_id` like `ctool-<6 random hex>`."),n.push("- For `workflows` items, `nodes` is a real JSON array of node objects. There is no `edges` field."),n.push('- Each node has fields: `id`, `type` ("start" | "end" | "tool" | "prompt"), `label`, `step_order`, `tool_id`, `tool_parameters` (object).'),n.push('- For new tools, include: `tool_id`, `name`, `description`, `api_version: "1.0.0"`, `inputs: []`, `outputs: []`, `code`.'),n.push("- Code fields must be valid JavaScript function bodies using only the documented `api.*` methods."),n.push("- DO NOT modify `data` â€” it is read-only context."),n.push("- DO NOT include any commentary outside the ```json block."),n.join(`
+`)}async function o_(){if(!D)return;let h=z("modify-request").value,_=r_(D,h);try{await navigator.clipboard.writeText(_);let y=z("modify-copy-status");y.textContent=`Copied (${_.length.toLocaleString()} chars). Paste into your AI, then paste the response below.`,window.setTimeout(()=>{y.textContent=""},8000)}catch(y){alert(`Could not copy to clipboard: ${y.message}`)}}function w_(h){let _=h.match(/```(?:json)?\s*\n?([\s\S]*?)```/);if(_)return _[1].trim();let y=h.indexOf("{");if(y===-1)return h.trim();let J=h.lastIndexOf("}");if(J>y)return h.slice(y,J+1).trim();return h.trim()}function d_(h){if(!P.file)throw Error("No workspace loaded");let _=0,y=0,J=0,j=0;if(Array.isArray(h.workflows)){if(!P.file.workflows)P.file.workflows=[];for(let n of h.workflows){let K=n.id||n.workflow_id;if(!K)continue;let b={...n,id:K};if(delete b.workflow_id,typeof b.nodes==="string")try{b.nodes=JSON.parse(b.nodes)}catch{}delete b.edges;let O=P.file.workflows.find((U)=>U.id===K);if(O)Object.assign(O,b);else{if(!b.nodes)b.nodes=[];P.file.workflows.push(b),j++}_++}}if(Array.isArray(h.tools)){if(!P.file.tools)P.file.tools=[];for(let n of h.tools){if(!n.tool_id)continue;let K=P.file.tools.find((b)=>b.tool_id===n.tool_id);if(K)Object.assign(K,n);else P.file.tools.push(n),j++;y++}}if(Array.isArray(h.knowledge)){if(!P.file.knowledge)P.file.knowledge=[];for(let n of h.knowledge){if(!n.name)continue;let K=P.file.knowledge.find((b)=>b.name===n.name);if(K)Object.assign(K,n);else P.file.knowledge.push(n),j++;J++}}return{workflows:_,tools:y,packs:J,added:j}}function i_(){if(!P.file)return;let h=z("modify-response").value.trim(),_=z("modify-apply-status");if(!h){_.textContent="Paste the AI response first.";return}let y=w_(h),J;try{J=JSON.parse(y)}catch(j){_.textContent=`Parse failed: ${j.message}. Check the response is a valid JSON block.`;return}try{let j=d_(J);if(j.workflows+j.tools+j.packs===0){_.textContent="Parsed OK but no recognized changes (need workflows, tools, or knowledge).";return}R(),_.textContent=`Applied: ${j.workflows} workflow(s), ${j.tools} tool(s), ${j.packs} pack(s) (${j.added} new). Click "Save to Disk" to persist.`}catch(j){_.textContent=`Apply failed: ${j.message}`}}function a_(h){if(!P.file)return"";let _=[];_.push("You are editing a custom tool for the WFP runner."),_.push("The tool is a JavaScript function body executed in the browser with access to an `api` object.\n"),_.push(`# USER REQUEST
+`),_.push(`[Replace this line with what you want changed. Then send to the AI.]
+`),_.push(`# CURRENT TOOL
+`),_.push(`## Name
+${h.name||"(empty)"}
+`),_.push(`## Description
+${h.description||"(empty)"}
+`),_.push(`## Code
+\`\`\`js
+${h.code||"// (empty â€” write a new tool from scratch)"}
+\`\`\`
+`),_.push(c),_.push("");let y=Object.entries(P.file.data||{});if(y.length>0){_.push("# Available user data"),_.push('Read these with `api.getParameter("<name>")`. CSV-derived data is an array of objects (column names below). Numbers are strings â€” use parseFloat()/parseInt().\n');for(let[n,K]of y){let b=E(K),O=b._meta.columns?`
+Columns: ${b._meta.columns.join(", ")}`:"",U=b._meta.rowCount!==void 0?` (${b._meta.rowCount} rows)`:"",X=Array.isArray(b.data)&&b.data.length>0?`
+First 3 rows: ${JSON.stringify(b.data.slice(0,3))}`:"";_.push(`### ${n}${U}${O}${X}
+`)}}let J=(P.file.tools||[]).filter((n)=>n.name!==h.name||n.description!==h.description);if(J.length>0){_.push("# Other tools in this workspace"),_.push(`(For reference â€” your tool may read parameters these tools produce.)
+`);for(let n of J){let K=(n.description||"").trim().split(`
+`)[0].slice(0,200);_.push(`- **${n.name}** (\`${n.tool_id}\`) â€” ${K}`)}_.push("")}let j=P.file.knowledge||[];if(j.length>0){_.push("# Available knowledge packs"),_.push('Read content with `api.getKnowledge("<name>")` â€” returns markdown text or null.\n');for(let n of j)_.push(`- **${n.name}** (scope: ${n.scope||"chat+workflow"})`);_.push("")}return _.push("# OUTPUT FORMAT"),_.push(`Return your response in two clearly-labeled parts so the user can copy each into the matching field:
+`),_.push("**Description**"),_.push(`(A short paragraph describing what the tool does after your changes. Plain text. The user will paste this into the Description field.)
+`),_.push("**Code**"),_.push("```js"),_.push("// Complete updated function body. The user will paste this into the Code field."),_.push("```"),_.push(`
+If only one of them changes, return both anyway (unchanged for the other).`),_.join(`
+`)}async function l_(){let h={name:z("tool-modal-name").value,description:z("tool-modal-description").value,code:z("tool-modal-code").value},_=a_(h);try{await navigator.clipboard.writeText(_);let y=z("tool-copy-status");y.textContent=`Copied (${_.length.toLocaleString()} chars). Paste into Claude / Gemini / ChatGPT, then add your request.`,window.setTimeout(()=>{y.textContent=""},8000)}catch(y){alert(`Could not copy to clipboard: ${y.message}`)}}var C=null,v=!1;function s_(){if(!P.file)return;C=null,v=!0,z("data-modal-title").textContent="Add data file",z("data-modal-meta").textContent="",z("data-modal-name").value="",z("data-modal-type").value="csv",z("data-modal-textarea").value="",z("data-modal-name-row").classList.remove("hidden-row"),z("data-modal-type-row").classList.remove("hidden-row"),z("btn-data-delete").classList.add("hidden-row"),z("data-modal").classList.remove("hidden")}function e_(h){if(!P.file?.data?.[h])return;let _=P.file.data[h];C=h,v=!1,z("data-modal-title").textContent=`Edit: ${h}`;let y=_.content_type||"text",J=_.row_count!=null?`${y} Â· ${_.row_count} rows`:y;z("data-modal-meta").textContent=J,z("data-modal-textarea").value=typeof _.content==="string"?_.content:"(encrypted â€” open with a runner that can decrypt this segment)",z("data-modal-name-row").classList.add("hidden-row"),z("data-modal-type-row").classList.add("hidden-row"),z("btn-data-delete").classList.remove("hidden-row"),z("data-modal").classList.remove("hidden")}function _h(){C=null,v=!1,z("data-modal").classList.add("hidden")}async function t_(){let h=document.createElement("input");h.type="file",h.accept=".csv,.json,.txt,text/*,application/json",h.onchange=async()=>{let _=h.files?.[0];if(!_)return;let y=await _.text();if(z("data-modal-textarea").value=y,v){let j=_.name.replace(/\.[^.]+$/,"").toLowerCase().replace(/[^a-z0-9_]/g,"_").replace(/^_+|_+$/g,"");if(j&&!z("data-modal-name").value)z("data-modal-name").value=j;let n=_.name.toLowerCase().split(".").pop(),K=z("data-modal-type");if(n==="csv")K.value="csv";else if(n==="json")try{let b=JSON.parse(y);K.value=Array.isArray(b)?"json_array":"json_object"}catch{K.value="json_array"}else if(n==="txt"||n==="md")K.value="text"}},h.click()}function hy(){if(!P.file)return;if(!P.file.data)P.file.data={};let h=z("data-modal-textarea").value,_,y;if(v){let K=z("data-modal-name").value.trim();if(!K){alert("Please enter a name.");return}let b=K.toLowerCase().replace(/[^a-z0-9_]/g,"_").replace(/^_+|_+$/g,"");if(!b){alert("Name must contain at least one letter or digit.");return}if(P.file.data[b]){if(!confirm(`A data file named "${b}" already exists. Replace?`))return}_=b,y=z("data-modal-type").value}else{if(!C)return;_=C,y=P.file.data[_]?.content_type||"text"}let J,j,n;if(y==="csv"){let K=g(h);j=K.length,J=K.length>0?Object.keys(K[0]):[],n=K}else if(y==="json_array")try{let K=JSON.parse(h);if(Array.isArray(K))j=K.length,J=K.length>0&&typeof K[0]==="object"&&K[0]!==null?Object.keys(K[0]):[],n=K}catch{}else if(y==="json_object")try{n=JSON.parse(h)}catch{}P.file.data[_]={content:h,content_type:y,...n!==void 0?{content_json:n}:{},...J!==void 0?{columns:J}:{},...j!==void 0?{row_count:j}:{},edited_at:new Date().toISOString()},_h(),R()}function _y(){if(!C||!P.file?.data)return;let h=C;if(!confirm(`Delete data file "${h}"? Cannot be undone unless you reopen the .wfp without saving.`))return;delete P.file.data[h],_h(),R()}var L=null,$=!1;function yy(){if(!P.file)return;L=null,$=!0,z("pack-modal-title").textContent="Add knowledge pack",z("pack-modal-name").value="",z("pack-modal-name").disabled=!1,z("pack-modal-scope").value="workflow",z("pack-modal-tags").value="",z("pack-modal-content").value="",z("btn-pack-delete").classList.add("hidden-row"),z("pack-modal").classList.remove("hidden")}function ny(h){if(!P.file?.knowledge)return;let _=P.file.knowledge.find((y)=>y.name===h);if(!_)return;L=h,$=!1,z("pack-modal-title").textContent=`Edit pack: ${_.name}`,z("pack-modal-name").value=_.name,z("pack-modal-name").disabled=!0,z("pack-modal-scope").value=_.scope||"",z("pack-modal-tags").value=(_.tags||[]).join(", "),z("pack-modal-content").value=_.content,z("btn-pack-delete").classList.remove("hidden-row"),z("pack-modal").classList.remove("hidden")}function yh(){L=null,$=!1,z("pack-modal").classList.add("hidden")}function Jy(){if(!P.file)return;if(!P.file.knowledge)P.file.knowledge=[];let h=z("pack-modal-content").value,y=z("pack-modal-scope").value.trim()||"chat+workflow",j=z("pack-modal-tags").value.split(",").map((n)=>n.trim()).filter((n)=>n.length>0);if($){let n=z("pack-modal-name").value.trim();if(!n){alert("Please enter a name.");return}let K=n.toLowerCase().replace(/[^a-z0-9_-]/g,"-").replace(/^-+|-+$/g,"");if(!K){alert("Name must contain at least one letter or digit.");return}if(P.file.knowledge.find((b)=>b.name===K)){if(!confirm(`A pack named "${K}" already exists. Replace?`))return;P.file.knowledge=P.file.knowledge.filter((b)=>b.name!==K)}P.file.knowledge.push({name:K,scope:y,tags:j.length>0?j:void 0,content:h})}else{if(!L)return;let n=P.file.knowledge.find((K)=>K.name===L);if(!n)return;n.scope=y,n.tags=j.length>0?j:void 0,n.content=h}yh(),R()}function jy(){if(!L||!P.file?.knowledge)return;if(!confirm(`Delete pack "${L}"? Cannot be undone unless you reopen the .wfp without saving.`))return;P.file.knowledge=P.file.knowledge.filter((h)=>h.name!==L),yh(),R()}z("btn-new-workspace").addEventListener("click",N_);z("btn-open").addEventListener("click",M_);z("btn-save").addEventListener("click",ph);z("btn-save-cancel").addEventListener("click",ch);z("btn-save-confirm").addEventListener("click",A_);z("btn-settings").addEventListener("click",fh);z("btn-cfg-save").addEventListener("click",v_);z("btn-cfg-cancel").addEventListener("click",e);z("btn-cfg-clear").addEventListener("click",I_);z("btn-clear-log").addEventListener("click",f);z("btn-add-data").addEventListener("click",s_);z("btn-data-save").addEventListener("click",hy);z("btn-data-cancel").addEventListener("click",_h);z("btn-data-replace").addEventListener("click",t_);z("btn-data-delete").addEventListener("click",_y);z("btn-add-pack").addEventListener("click",yy);z("btn-pack-save").addEventListener("click",Jy);z("btn-pack-cancel").addEventListener("click",yh);z("btn-pack-delete").addEventListener("click",jy);z("btn-tool-save").addEventListener("click",g_);z("btn-tool-cancel").addEventListener("click",t);z("btn-tool-delete").addEventListener("click",k_);z("btn-tool-copy-prompt").addEventListener("click",l_);z("btn-modify-copy").addEventListener("click",o_);z("btn-new-workflow").addEventListener("click",f_);z("btn-modify-apply").addEventListener("click",i_);z("btn-modify-cancel").addEventListener("click",p_);z("btn-modify-delete").addEventListener("click",m_);z("btn-modify-save").addEventListener("click",async()=>{await ph(),z("modify-apply-status").textContent="Saved to disk."});z("mic-widget").addEventListener("click",E_);S_();var p=L_();if(p){P.file=p.file,P.fileName=p.fileName,P.fileHandle=null;let h=P.file.extensions?.app;if(P.voice&&h?.wake_word)P.voice.setWakeWord(h.wake_word);if(P.voice&&h?.tts_voice)P.voice.setVoicePref(h.tts_voice)}R();if(p)kh();document.title=`WFP Runner (format v${V})`;})();
+
+</script>
+</body>
+</html>
