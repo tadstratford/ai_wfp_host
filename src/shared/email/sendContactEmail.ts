@@ -4,13 +4,12 @@ export interface ContactFormData {
     message: string;
 }
 
-const RESEND_API_KEY = process.env.RESEND_API_KEY;
-const CONTACT_TO_EMAIL = process.env.CONTACT_TO_EMAIL;
-
 /**
  * Send contact form submission via Resend.
  */
 export const sendContactEmail = async (data: ContactFormData): Promise<{ success: boolean; message: string }> => {
+    const RESEND_API_KEY = process.env.RESEND_API_KEY;
+    const CONTACT_TO_EMAIL = process.env.CONTACT_TO_EMAIL;
     if (!RESEND_API_KEY || !CONTACT_TO_EMAIL) {
         console.log("[sendContactEmail] RESEND_API_KEY or CONTACT_TO_EMAIL not set.");
         return { success: false, message: "Email service not configured." };
