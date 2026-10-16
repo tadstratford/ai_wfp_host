@@ -16,6 +16,7 @@ import {
 } from "@capabilities/qbo/client";
 import { getSessionByDatabaseId } from "@backend/core/workspace/workspaceSessionStore";
 import { buildQboStatementHtml, mergeStatementMonths, type QboStatementRow, type StatementMonthRow } from "@capabilities/qbo/statementReport";
+import { saveDataEntry } from "@data";
 
 let currentScope: string | null = null;
 let currentDatabaseId: string | null = null;
@@ -104,6 +105,66 @@ export const toNum = (s?: string) => {
   const n = Number((s ?? "").replace(/,/g, ""));
   return Number.isFinite(n) ? n : 0;
 };
+
+/** Flatten a normalized statement (amount columns + rows) into a tabular JSON
+ *  array of row objects. Single-column statements use an `amount` key; multi-
+ *  column statements use one key per column. Amounts are numeric so the table
+ *  is directly consumable by aggregate_data / report_table / save_data. */
+export function statementRowsToTable(
+  columns: string[],
+  rows: QboStatementRow[],
+): Record<string, unknown>[] {
+  const single = columns.length <= 1;
+  const valueKeys = single
+    ? ["amount"]
+    : columns.map((c, i) => (c ? c : `column_${i + 1}`));
+  return rows.map((r) => {
+    const row: Record<string, unknown> = {
+      label: r.label,
+      kind: r.kind,
+      depth: r.depth,
+    };
+    for (let i = 0; i < valueKeys.length; i++) {
+      const raw = r.values[i] ?? "";
+      row[valueKeys[i]] = raw === "" ? null : toNum(raw);
+    }
+    return row;
+  });
+}
+
+/** Persist a normalized statement table into the workspace data map (with the
+ *  same sanitization + privacy masking as save_data / api.setData). Returns the
+ *  sanitized name the entry was stored under, or null when there is no active
+ *  workspace scope. */
+export function saveStatementTable(
+  name: string,
+  columns: string[],
+  rows: QboStatementRow[],
+): string | null {
+  const db = getDatabaseId();
+  if (!db) return null;
+  const table = statementRowsToTable(columns, rows);
+  const { name: stored } = saveDataEntry(db, name, {
+    _meta: { type: "json_array" },
+    data: table,
+  });
+  return stored;
+}
+
+/** Persist a raw QBO report (Header/Columns/Rows) as a structured table. */
+export function saveReportTable(name: string, report: any): string | null {
+  const { columns, rows } = formatReportRows(report);
+  return saveStatementTable(
+    name,
+    columns.slice(1),
+    rows.map((r) => ({
+      kind: r.kind as "section" | "summary" | "data",
+      label: r.label,
+      depth: r.depth,
+      values: r.values.map((v) => v.value),
+    })),
+  );
+}
 
 /** Expand a calendar date range into month boundaries: [{ period, start, end }]. */
 export function monthRange(startDate: string, endDate: string): { period: string; start: string; end: string }[] {

@@ -172,6 +172,12 @@ function qboStatementType(raw: string): "pnl" | "balance_sheet" | null {
   return null;
 }
 
+/** True when the request asks to save the result into durable workspace data. */
+function wantsSaveToData(raw: string): boolean {
+  const t = raw.toLowerCase();
+  return /\bsave\b/.test(t) && /\b(data|workspace|persist|store)\b/.test(t);
+}
+
 /** Map a QBO targeted-read request to its read tool id (deterministic). */
 function qboReadTool(raw: string): string | null {
   const t = raw.toLowerCase();
@@ -233,6 +239,12 @@ async function qboStatementPlan(
   }
   if (typeof values.accounting_method === "string") {
     tp.accounting_method = values.accounting_method;
+  }
+  // "save it to data" → persist the structured statement rows alongside the HTML.
+  if (wantsSaveToData(req.rawMessage)) {
+    const year = start_date.slice(0, 4);
+    tp.save_to =
+      stmt === "pnl" ? `chat_qbo_pnl_${year}` : `chat_qbo_balance_sheet_${year}`;
   }
 
   const steps: PlanStep[] = [

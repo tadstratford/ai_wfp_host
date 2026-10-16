@@ -239,6 +239,42 @@ function isApproval(raw: string): boolean {
   ].includes(t);
 }
 
+/** True when a short message asks to save the prior turn's result to data
+ *  ("save to data", "save this to data", …), as opposed to a fresh request that
+ *  names a new subject ("save the balance sheet to data"). */
+function isSaveToDataFollowUp(raw: string): boolean {
+  const t = raw.trim().toLowerCase().replace(/[.!?]+$/, "");
+  const words = t.split(/\s+/).filter(Boolean);
+  if (words.length > 6) return false;
+  if (!/\bsave\b/.test(t) || !/\bdata\b/.test(t)) return false;
+  const backRef = /\b(it|this|that|these|those|the\s+(report|data|result|above|prior|previous|output|file))\b/.test(t);
+  return backRef || words.length <= 3;
+}
+
+/** The workspace data entry the most recent turn persisted (a report `save_to`
+ *  arg or a `save_data` step), if any. */
+function lastSavedDataName(metadata: any): string | null {
+  const calls = Array.isArray(metadata?.toolCalls) ? metadata.toolCalls : [];
+  for (let i = calls.length - 1; i >= 0; i--) {
+    const tools = calls[i]?.tools;
+    if (!Array.isArray(tools)) continue;
+    for (const rec of tools) {
+      let args: any = rec?.args;
+      if (typeof args === "string") {
+        try { args = JSON.parse(args); } catch { continue; }
+      }
+      if (!args || typeof args !== "object") continue;
+      if (rec.tool === "save_data" && typeof args.name === "string" && args.name) {
+        return args.name.startsWith("staging_") ? args.name : `chat_${args.name}`;
+      }
+      if (typeof args.save_to === "string" && args.save_to) {
+        return args.save_to;
+      }
+    }
+  }
+  return null;
+}
+
 // ── Write detection (deterministic backstop to Jev's `mutating`) ─────────────
 // Jev's `mutating` Noul is advisory and can under-score requests that produce a
 // file/report ("make a test report"). These deterministic signals complement it:
@@ -961,6 +997,25 @@ export async function processUserMessage(
     (await tryFollowUpCarryForward(lastReq, rawMessage, io))
   ) {
     return;
+  }
+
+  // ── "save to data" follow-up gate ────────────────────────────────────
+  // "save this/that/it to data" references the prior turn's output. If that turn
+  // already persisted it (report save_to / save_data), confirm the name instead
+  // of routing to data-handling (which would ask "which data?").
+  if (isSaveToDataFollowUp(rawMessage)) {
+    const savedName = lastSavedDataName(session?.metadata);
+    const ws = savedName ? getSessionByDatabaseId(io.databaseId) : null;
+    if (savedName && ws?.getDataEntry(savedName)) {
+      await io.addMessage({
+        markdown: `Already saved as \`${savedName}\` — it's on the Data page and readable via \`get_data\` / \`list_data\`.`,
+        json: { kind: "reply", savedData: savedName },
+      });
+      console.log(
+        `[vers_8] "save to data" follow-up → already saved as ${savedName}`,
+      );
+      return;
+    }
   }
 
   // ── Phase 1: Jev routing (skill + tool + gates) ─────────────────────

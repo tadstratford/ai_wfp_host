@@ -260,6 +260,14 @@ export async function renderChatContent(
             </button>
           )}
           <button
+            type="button"
+            data-session-id={session.session_id}
+            onclick="copySessionData(this)"
+            class={buttonClass}
+          >
+            Copy session
+          </button>
+          <button
             hx-get="/app/session?action=new"
             hx-target="#main-panel"
             hx-swap="innerHTML"

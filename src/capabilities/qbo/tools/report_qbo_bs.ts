@@ -1,11 +1,11 @@
 import { z } from "zod";
 import { defineTool } from "../../tool";
-import { requireScope, notConnected, statementHtml, fetchReportWithFallback } from "../scope";
+import { requireScope, notConnected, statementHtml, fetchReportWithFallback, saveReportTable } from "../scope";
 import { QBOClient, checkQBOConnected } from "@capabilities/qbo/client";
 
 export default defineTool({
   name: "report_qbo_bs",
-  description: "Fetches the QuickBooks Online Balance Sheet report and renders it as a self-contained, native-QBO-style HTML statement (bold section headers, indented line items, ruled subtotal rows). Deterministic — no LLM. Returns HTML text for a following chat_download(data=\"{{result}}\") step.",
+  description: "Fetches the QuickBooks Online Balance Sheet report and renders it as a self-contained, native-QBO-style HTML statement (bold section headers, indented line items, ruled subtotal rows). Deterministic — no LLM. Returns HTML text for a following chat_download(data=\"{{result}}\") step. When save_to is set, also emits a structured tabular version of the statement rows (json_array) into that workspace data entry.",
   class: "read",
   output: { metaType: "text", tabular: false },
   durable: true,
@@ -15,8 +15,9 @@ export default defineTool({
     end_date: z.string().describe("Report end date (YYYY-MM-DD). For an as-of snapshot, use the same value as start_date."),
     summarize_column_by: z.enum(["Total", "Days", "Weeks", "Months", "Quarterly", "Annual"]).optional().describe("Column grouping. Defaults to \"Total\" (single as-of column)."),
     accounting_method: z.enum(["Accrual", "Cash"]).optional().describe("Accounting basis. Defaults to \"Accrual\"."),
+    save_to: z.string().optional().describe("Optional workspace data entry name to also write the structured statement rows to (json_array)."),
   },
-  handler: async ({ start_date, end_date, summarize_column_by, accounting_method }) => {
+  handler: async ({ start_date, end_date, summarize_column_by, accounting_method, save_to }) => {
     const scope = requireScope();
     if (!(await checkQBOConnected(scope))) return notConnected();
     const client = new QBOClient(scope);
@@ -27,6 +28,7 @@ export default defineTool({
       client, "balance", start_date, end_date, summarize_column_by ?? "Total", method,
     );
 
+    if (save_to) saveReportTable(save_to, report);
     const html = statementHtml(report, "Balance Sheet", method, note);
     return { content: [{ type: "text" as const, text: html }] };
   },

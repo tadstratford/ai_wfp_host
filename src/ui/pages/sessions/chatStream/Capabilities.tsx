@@ -7,7 +7,7 @@ import { CHAT_CAPABILITIES } from "@shared/chatCapabilities";
  */
 export const Capabilities: FC = () => {
   return (
-    <details open class="rounded-xl border border-ink/[0.08] dark:border-white/[0.08] bg-white/60 dark:bg-ink-900/40 p-4">
+    <details class="rounded-xl border border-ink/[0.08] dark:border-white/[0.08] bg-white/60 dark:bg-ink-900/40 p-4">
       <summary class="cursor-pointer select-none text-xs font-semibold uppercase tracking-wider text-ink-400 dark:text-ink-500 hover:text-ink-600 dark:hover:text-ink-300">
         Capabilities
       </summary>
