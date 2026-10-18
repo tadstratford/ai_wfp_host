@@ -20,6 +20,7 @@ import qboUncategorized from "./qbo_uncategorized";
 import qboJournalEntries from "./qbo_journal_entries";
 import qboJournalCreate from "./qbo_journal_create";
 import qboActualsFlat from "./qbo_actuals_flat";
+import qboAllocationCompute from "./qbo_allocation_compute";
 
 export const tools = [
   qboConnect,
@@ -44,4 +45,5 @@ export const tools = [
   qboJournalEntries,
   qboJournalCreate,
   qboActualsFlat,
+  qboAllocationCompute,
 ];

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { defineTool } from "../../tool";
-import { requireScope, notConnected } from "../scope";
+import { requireScope, notConnected, getDatabaseId } from "../scope";
+import { getSessionByDatabaseId } from "@backend/core/workspace/workspaceSessionStore";
 import { QBOClient, checkQBOConnected, type QBOAccount, type QBOVendor, type QBOCustomer, type QBOClass, type QBODepartment, type QBOJournalEntryInput } from "@capabilities/qbo/client";
 
 export default defineTool({
@@ -19,11 +20,12 @@ export default defineTool({
       vendor: z.string().optional().describe("Vendor name or Id to attach to this line (e.g., on an Accounts Payable line)"),
       customer: z.string().optional().describe("Customer name or Id to attach to this line"),
       employee: z.string().optional().describe("Employee Id to attach to this line (Id only)"),
-    })).min(2).describe("Journal entry lines; total debits must equal total credits"),
+    })).optional().describe("Journal entry lines; total debits must equal total credits"),
+    lines_source: z.string().optional().describe("Data entry name holding the journal lines (e.g. the interim table written by qbo_allocation_compute) as an alternative to inline `lines`."),
     private_note: z.string().optional().describe("Optional private note"),
     doc_number: z.string().optional().describe("Optional reference/doc number"),
   },
-  handler: async ({ txn_date, lines, private_note, doc_number }) => {
+  handler: async ({ txn_date, lines, lines_source, private_note, doc_number }) => {
     const scope = requireScope();
     if (!(await checkQBOConnected(scope))) return notConnected();
     const client = new QBOClient(scope);
@@ -101,7 +103,23 @@ export default defineTool({
     const resolveCustomer = (ref: string) =>
       resolveRef(ref, customerById, customerByName, "Customer", customers.map((c) => c.DisplayName));
 
-    const qboLines = lines.map((l) => ({
+    let lineInputs: any[];
+    if (lines_source) {
+      const db = getDatabaseId();
+      const ws = db ? getSessionByDatabaseId(db) : null;
+      const entry = ws?.getDataEntry(lines_source);
+      if (!entry || !Array.isArray(entry.content_json)) {
+        return { content: [{ type: "text" as const, text: `Lines source "${lines_source}" not found or not a table.` }], isError: true };
+      }
+      lineInputs = entry.content_json as any[];
+    } else {
+      lineInputs = lines ?? [];
+    }
+    if (lineInputs.length < 2) {
+      return { content: [{ type: "text" as const, text: "Journal entry requires at least 2 lines (provide `lines` or `lines_source`)." }], isError: true };
+    }
+
+    const qboLines = lineInputs.map((l) => ({
       Description: l.description ?? "",
       Amount: l.amount,
       DetailType: "JournalEntryLineDetail" as const,

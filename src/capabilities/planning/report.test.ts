@@ -71,6 +71,7 @@ describe("buildPlanVarianceReportHtml", () => {
     expect(html).toContain("Period");
     expect(html).toContain("Actual");
     expect(html).toContain("Budget");
+    expect(html).toContain("Variance");
   });
 
   it("renders an empty state when there are no lines", () => {

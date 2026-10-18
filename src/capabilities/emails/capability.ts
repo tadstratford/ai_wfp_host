@@ -5,12 +5,12 @@ import { tools } from "./tools";
 
 const manifest: CapabilityManifest = {
   key: "emails",
-  name: "Email",
+  name: "Email Outbound",
   version: "1.0.0",
-  description: "Workspace email inbox + outbound send_email.",
+  description: "Outbound email via Resend (send_email), subject to the workspace outbound allowlist.",
   trust: "core",
   kind: "builtin",
-  group: { key: "email-outbound", label: "Outbound Email", defaultEnabled: false },
+  group: { key: "email-outbound", label: "Email Outbound", defaultEnabled: false },
   skills: ["email-outbound"],
 };
 

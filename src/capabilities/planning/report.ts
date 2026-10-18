@@ -150,10 +150,23 @@ export function buildPlanVarianceReportHtml(input: PlanVarianceReportInput): str
       const id = `v${i++}`;
       const favCls = line.favorable ? "fav" : "unfav";
       const monthRows = line.months
-        .map(
-          (m) =>
-            `<tr><td>P${m.per}</td><td class="num">${fmtMoney(m.base)}</td><td class="num">${fmtMoney(m.compare)}</td></tr>`,
-        )
+        .map((m) => {
+          const v =
+            m.base != null && m.compare != null
+              ? Math.round((m.base - m.compare) * 100) / 100
+              : null;
+          const vCls =
+            v === null || v === 0
+              ? ""
+              : line.kind === "expense"
+                ? v < 0
+                  ? "fav"
+                  : "unfav"
+                : v >= 0
+                  ? "fav"
+                  : "unfav";
+          return `<tr><td>P${m.per}</td><td class="num">${fmtMoney(m.base)}</td><td class="num">${fmtMoney(m.compare)}</td><td class="num ${vCls}">${fmtMoney(v)}</td></tr>`;
+        })
         .join("");
       body.push(
         `<tr class="cat-row" onclick="toggle('${id}')">
@@ -164,7 +177,7 @@ export function buildPlanVarianceReportHtml(input: PlanVarianceReportInput): str
           <td class="num ${favCls}">${fmtPct(line.variancePct)}</td>
         </tr>`,
         `<tr id="detail-${id}" class="detail-row hidden"><td colspan="${colSpan}">
-          <table class="tx-table"><thead><tr><th>Period</th><th class="num">Actual</th><th class="num">Budget</th></tr></thead><tbody>${monthRows}</tbody></table>
+          <table class="tx-table"><thead><tr><th>Period</th><th class="num">Actual</th><th class="num">Budget</th><th class="num">Variance</th></tr></thead><tbody>${monthRows}</tbody></table>
         </td></tr>`,
       );
     }

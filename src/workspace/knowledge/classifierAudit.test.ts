@@ -64,20 +64,13 @@ describe("runClassifierRuleAudit", () => {
 });
 
 function streamFetch(opts: {
-  workspace?: number;
+  ruleViolated?: number;
   presented?: number;
-  failedRule?: string;
 }): typeof fetch {
   return (async () => {
     const answers: Record<string, unknown> = {
-      workspace_pass: { type: "noul", noul: opts.workspace ?? 1 },
-      presented_pass: { type: "noul", noul: opts.presented ?? 1 },
-      failed_rule: {
-        type: "choice",
-        choice: opts.failedRule ?? "none",
-        probabilities: {},
-        confidence: 1,
-      },
+      rule_0: { type: "noul", noul: opts.ruleViolated ?? 0 },
+      presented_violated: { type: "noul", noul: opts.presented ?? 0 },
     };
     return new Response(
       JSON.stringify({
@@ -96,37 +89,37 @@ describe("runStreamRuleAudit", () => {
   ];
   const presented = "Schedule payables by due date.";
 
-  it("reports no_errors when both rule sets pass", async () => {
+  it("reports no_errors when no rule is violated", async () => {
     const report = await runStreamRuleAudit({
       workspaceRules: rules,
       presentedRules: presented,
       stream: "some output",
       apiKey: "test-key",
-      fetchImpl: streamFetch({ workspace: 0.9, presented: 0.8 }),
+      fetchImpl: streamFetch({ ruleViolated: 0, presented: 0 }),
     });
     expect(report.statusReason).toBe("no_errors");
     expect(report.failedRule).toBeNull();
   });
 
-  it("reports broke_workspace_rule when a workspace rule fails", async () => {
+  it("reports broke_workspace_rule when a workspace rule is violated", async () => {
     const report = await runStreamRuleAudit({
       workspaceRules: rules,
       presentedRules: presented,
       stream: "some output",
       apiKey: "test-key",
-      fetchImpl: streamFetch({ workspace: 0.1, presented: 0.9, failedRule: "travel-sales" }),
+      fetchImpl: streamFetch({ ruleViolated: 0.9, presented: 0 }),
     });
     expect(report.statusReason).toBe("broke_workspace_rule");
     expect(report.failedRule).toBe("travel-sales");
   });
 
-  it("reports broke_presented_rule when only the presented rules fail", async () => {
+  it("reports broke_presented_rule when only the presented rules are violated", async () => {
     const report = await runStreamRuleAudit({
       workspaceRules: rules,
       presentedRules: presented,
       stream: "some output",
       apiKey: "test-key",
-      fetchImpl: streamFetch({ workspace: 0.9, presented: 0.1 }),
+      fetchImpl: streamFetch({ ruleViolated: 0, presented: 0.9 }),
     });
     expect(report.statusReason).toBe("broke_presented_rule");
     expect(report.failedRule).toBeNull();

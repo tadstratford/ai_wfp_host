@@ -31,9 +31,15 @@ const PlanSchema = z.object({
 const PLAN_SYSTEM =
   "You plan a data/analysis workflow as an ordered list of existing tools. " +
   "Return ONLY a JSON object: {\"steps\": [{\"tool_id\": \"...\", \"tool_parameters\": {...}}]}. " +
-  "Use only the tools listed. Resolve every required parameter from the request or a clear default; " +
-  "never invent data-file names. When a step's input comes from the previous step's output, set it to the " +
-  "literal string \"{{result}}\". Produce the minimal complete plan that delivers the user's outcome.";
+  "Use only the tools listed. Resolve every required parameter from the request, a clear default, or a named data entry (source/name); never invent data-file names. " +
+  "Structured tool inputs (rows, entries, items, lines, summary, details, source, name) must reference a named data entry, not a previous step's raw output. " +
+  "Use the literal string \"{{result}}\" ONLY for sink parameters that consume the previous step's output for delivery or persistence (e.g. chat_download.data, save_data.value). " +
+  "Produce the minimal complete plan that delivers the user's outcome.";
+
+/** Parameters where `{{result}}` is a valid value — delivery/persistence sinks
+ *  that consume the previous step's raw output. Everywhere else `{{result}}`
+ *  would feed an untyped raw value into a structured input. */
+const RESULT_SINK_PARAMS = new Set(["chat_download.data", "save_data.value"]);
 
 export const llmPlanner: Planner = {
   id: "llm",
@@ -98,6 +104,20 @@ export const llmPlanner: Planner = {
     }
     if (missingRequired.length > 0) {
       return { kind: "clarify", missing: missingRequired };
+    }
+
+    // `{{result}}` may only feed a delivery/persistence sink. Wired into any
+    // other parameter it would push an untyped raw value into a structured
+    // input — reject the plan and fall back to the build loop.
+    for (const step of steps) {
+      for (const [k, v] of Object.entries(step.tool_parameters)) {
+        if (v === "{{result}}" && !RESULT_SINK_PARAMS.has(`${step.tool_id}.${k}`)) {
+          return {
+            kind: "fallback",
+            reason: `{{result}} wired into non-sink parameter ${step.tool_id}.${k}`,
+          };
+        }
+      }
     }
 
     const plan: NodePlan = { steps };

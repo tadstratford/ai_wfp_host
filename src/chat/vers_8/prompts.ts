@@ -135,6 +135,17 @@ get_data returns tabular data (csv/json_array) in pages of up to 500 rows. When 
 For large files (thousands of rows), do NOT page through every row. Use aggregate_data to group by a column and compute sum/count/avg/min/max (e.g. sum Debit grouped by Account), or pass a columns filter to get_data to page only the columns you need. Values in results are privacy-masked; refer to them by their tokens when asking follow-ups.`;
 
   const hasSkills = activeSkills && activeSkills.length > 0;
+
+  // Capability-contingent instructions: only mention a QuickBooks tool family
+  // when that capability's tools are actually in this request's tool set.
+  const hasLiveQbo = tools.some((t) => t.name.startsWith("qbo_"));
+  const hasDemoQbo = tools.some((t) => t.name.startsWith("qbodemo_"));
+  const qboInstruction = hasLiveQbo
+    ? "- When the user asks about QuickBooks data, use the appropriate qbo_* tool (for the live QuickBooks Online connection).\n"
+    : "";
+  const demoQboInstruction = hasDemoQbo
+    ? "- For the demo QuickBooks company (Acme Fund Services), use the qbodemo_* tools.\n"
+    : "";
   if (isEmail) {
     return `Today's date is ${today}.\n\nYou are the WorkflowPeople email agent. You are autonomously processing an INBOUND EMAIL that was sent to the workspace inbox. There is no human in the loop — you must act, not ask for confirmation.
 ${hasSkills ? `\n## Active Skill${activeSkills.length > 1 ? "s" : ""}\nYou have been assigned the following skill${activeSkills.length > 1 ? "s" : ""}: ${activeSkills.map((s) => `**${s}**`).join(", ")}. Follow their instructions below.${skillsSection}` : ""}
@@ -183,8 +194,7 @@ ${dataSection}
 ${typeVocab}
 
 ## Instructions
-- When the user asks about QuickBooks data, use the appropriate qbo_* tool (for the live QuickBooks Online connection).
-- Use workspace state tools to read or update metadata, persona, and notes.
+${qboInstruction}${demoQboInstruction}- Use workspace state tools to read or update metadata, persona, and notes.
 - Use todo tools to manage tasks.
 - Use set_param/get_param to track state — values persist in the chat session (a scratch pad) across turns, so use them to hold intermediate or combined data (e.g. an interim table). When the user wants data to persist as durable workspace data (across sessions and on the Data page), call save_data — it stores the value under a chat_ prefix and automatically checks it for sensitive values to add to the privacy mask.
 - For a small result (a handful of numbers or a short table), present it inline as a markdown table in your reply. Only use chat_download when the user explicitly asks for a file or needs a full multi-page report; only use set_param when the value must persist across turns.

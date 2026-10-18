@@ -89,14 +89,11 @@ export async function runClassifierRuleAudit(opts: {
  * (wfp.rules) and the rules presented in the workflow description, in a single
  * Jev classifier call. No LLM, no per-factor expansion.
  *
- * Two `noul` questions + one `choice`:
- *   - workspace_pass: does the stream satisfy ALL workspace rules?
- *   - presented_pass: does the stream follow all rules presented in the
- *     session discussion (the workflow description)?
- *   - failed_rule:    which workspace rule failed (or "none").
- *
- * The status reason is computed in code from the two booleans (fail-closed:
- * a missing/malformed answer fails).
+ * Violation-framed and N/A-tolerant: each workspace rule becomes its own `noul`
+ * — "does the stream VIOLATE this rule?" — plus one `noul` for the presented
+ * rules. A rule that does not apply to the stream scores "no violation" and
+ * passes; the audit fails only when a specific rule is actually violated (and
+ * names it). Fail-closed: a classifier error still fails.
  */
 
 export type StreamAuditStatusReason =
@@ -131,8 +128,6 @@ export async function runStreamRuleAudit(opts: {
 }): Promise<StreamRuleAuditReport> {
   const { workspaceRules, presentedRules, stream, apiKey } = opts;
 
-  const ruleNames = workspaceRules.map((r) => r.name);
-
   const state = {
     workspace_rules: workspaceRules.map((r) => ({
       name: r.name,
@@ -143,34 +138,26 @@ export async function runStreamRuleAudit(opts: {
     stream: stream.slice(0, MAX_STREAM_CHARS),
   };
 
-  const questions: Record<string, Question> = {
-    workspace_pass: {
+  const questions: Record<string, Question> = {};
+  workspaceRules.forEach((r, i) => {
+    questions[`rule_${i}`] = {
+      type: "noul",
+      instructions: `Does the stream VIOLATE workspace rule "${r.name}"? (See workspace_rules for its content.) Answer "yes" only when the rule is actually broken — a rule that does not apply to the stream is NOT a violation.`,
+    };
+  });
+  const hasPresented = presentedRules && presentedRules.trim().length > 0;
+  if (hasPresented) {
+    questions.presented_violated = {
       type: "noul",
       instructions:
-        "Does the stream satisfy ALL of the workspace rules listed in workspace_rules?",
-    },
-    presented_pass: {
-      type: "noul",
-      instructions:
-        "Does the stream follow all rules and requirements presented in presented_rules (the session discussion)?",
-    },
-    failed_rule: {
-      type: "choice",
-      instructions:
-        "If the stream failed a workspace rule, which one? Choose the specific rule name, or 'none' if no workspace rule failed.",
-      criteria: {
-        none: null,
-        ...Object.fromEntries(
-          ruleNames.map((n) => [n, `The stream failed workspace rule "${n}".`]),
-        ),
-      },
-    },
-  };
+        "Does the stream VIOLATE any rule or requirement presented in presented_rules?",
+    };
+  }
 
   let model = "";
-  let workspacePass = 0;
-  let presentedPass = 0;
-  let failedRule: string | null = null;
+  const violationScores: Record<string, number> = {};
+  let presentedViolation = 0;
+  let classifierError = false;
 
   try {
     const { response } = await askClassifier(state, questions, {
@@ -181,33 +168,39 @@ export async function runStreamRuleAudit(opts: {
     model = response.model || "";
     const answers = (response.answers ?? {}) as Record<string, Answer>;
 
-    const wp = answers.workspace_pass as NoulAnswer | undefined;
-    const pp = answers.presented_pass as NoulAnswer | undefined;
-    workspacePass = wp && typeof wp.noul === "number" ? wp.noul : 0;
-    presentedPass = pp && typeof pp.noul === "number" ? pp.noul : 0;
-
-    const fr = answers.failed_rule as
-      | { choice?: string }
-      | undefined;
-    if (fr && typeof fr.choice === "string" && fr.choice !== "none") {
-      failedRule = fr.choice;
-    }
+    workspaceRules.forEach((r, i) => {
+      const a = answers[`rule_${i}`] as NoulAnswer | undefined;
+      violationScores[r.name] = a && typeof a.noul === "number" ? a.noul : 0;
+    });
+    const pv = answers.presented_violated as NoulAnswer | undefined;
+    presentedViolation = pv && typeof pv.noul === "number" ? pv.noul : 0;
   } catch {
-    // Fail closed — both booleans stay 0, status reason resolves to a failure.
-    workspacePass = 0;
-    presentedPass = 0;
+    classifierError = true;
   }
 
-  const workspaceOk = workspacePass >= NOUL_PASS_THRESHOLD;
-  const presentedOk = presentedPass >= NOUL_PASS_THRESHOLD;
+  // The most-violated workspace rule (at or above threshold) is the failure.
+  let failedRule: string | null = null;
+  let maxScore = 0;
+  for (const r of workspaceRules) {
+    const s = violationScores[r.name] ?? 0;
+    if (s >= NOUL_PASS_THRESHOLD && s >= maxScore) {
+      failedRule = r.name;
+      maxScore = s;
+    }
+  }
+
+  const workspaceOk = !classifierError && failedRule === null;
+  const presentedOk = !classifierError && presentedViolation < NOUL_PASS_THRESHOLD;
 
   let statusReason: StreamAuditStatusReason;
-  if (workspaceOk && presentedOk) {
-    statusReason = "no_errors";
+  if (classifierError) {
+    statusReason = "broke_workspace_rule";
   } else if (!workspaceOk) {
     statusReason = "broke_workspace_rule";
-  } else {
+  } else if (hasPresented && !presentedOk) {
     statusReason = "broke_presented_rule";
+  } else {
+    statusReason = "no_errors";
   }
 
   return {

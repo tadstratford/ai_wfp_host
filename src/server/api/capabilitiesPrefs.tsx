@@ -1,6 +1,7 @@
 import { Context } from "hono";
 import type { User } from "@backend/types";
 import { listCapabilities } from "../../capabilities/registry";
+import { SKILL_GROUPS } from "@shared/skillGroups";
 import {
   ensureEnabledSkillGroups,
   saveEnabledSkillGroups,
@@ -28,12 +29,17 @@ function capabilitiesPrefsCard(opts: {
   const { enabled, message } = opts;
   const enabledSet = new Set(enabled);
 
-  // Toggleable capabilities (those with a group) first, then core (locked).
-  const capabilities = listCapabilities().slice().sort((a, b) => {
-    const aToggle = a.manifest.group ? 0 : 1;
-    const bToggle = b.manifest.group ? 0 : 1;
-    return aToggle - bToggle;
-  });
+  // Only toggleable capabilities (those that declare a group) are listed.
+  // Always-on core capabilities are hidden — they're not user-configurable and
+  // would only clutter the list. Order follows the SKILL_GROUPS declaration.
+  const groupOrder = new Map(SKILL_GROUPS.map((g, i) => [g.key, i]));
+  const capabilities = listCapabilities()
+    .filter((c) => c.manifest.group)
+    .sort((a, b) => {
+      const ao = groupOrder.get(a.manifest.group!.key) ?? 99;
+      const bo = groupOrder.get(b.manifest.group!.key) ?? 99;
+      return ao - bo;
+    });
 
   return (
     <div id="capabilities-prefs-card" class="card p-5 space-y-4">
@@ -89,45 +95,23 @@ function capabilitiesPrefsCard(opts: {
             </span>
           );
 
-          if (m.group) {
-            return (
-              <label
-                key={m.key}
-                class="flex items-start gap-3 p-3 rounded-lg border border-gray-200 dark:border-gray-700 cursor-pointer select-none hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
-              >
-                <input
-                  type="checkbox"
-                  name="groups"
-                  value={m.group.key}
-                  checked={enabledSet.has(m.group.key)}
-                  class="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                />
-                <span class="min-w-0">
-                  {title}
-                  {desc}
-                </span>
-              </label>
-            );
-          }
-
           return (
-            <div
+            <label
               key={m.key}
-              class="flex items-start gap-3 p-3 rounded-lg border border-gray-200 dark:border-gray-700 opacity-80"
+              class="flex items-start gap-3 p-3 rounded-lg border border-gray-200 dark:border-gray-700 cursor-pointer select-none hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
             >
-              <span class="mt-1.5 h-4 w-4 shrink-0 rounded border border-gray-300 bg-gray-100 dark:bg-gray-800 flex items-center justify-center">
-                <svg class="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="3">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
-                </svg>
-              </span>
+              <input
+                type="checkbox"
+                name="groups"
+                value={m.group!.key}
+                checked={enabledSet.has(m.group!.key)}
+                class="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              />
               <span class="min-w-0">
                 {title}
                 {desc}
-                <span class="block mt-0.5 text-[10px] font-medium uppercase tracking-wider text-gray-400 dark:text-gray-500">
-                  always on
-                </span>
               </span>
-            </div>
+            </label>
           );
         })}
 

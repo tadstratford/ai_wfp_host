@@ -5,12 +5,12 @@ import { tools } from "./tools";
 
 const manifest: CapabilityManifest = {
   key: "qbo",
-  name: "QuickBooks Online",
+  name: "QBO",
   version: "1.0.0",
   description: "Live QuickBooks Online report analysis, audit, and journaling.",
   trust: "integration",
   kind: "builtin",
-  group: { key: "qbo", label: "QuickBooks Online", defaultEnabled: false },
+  group: { key: "qbo", label: "QBO", defaultEnabled: false },
   prompt: "Give me the QBO Profit & Loss for this year to date.",
   skills: ["qbo-analysis", "qbo-audit", "qbo-journaling"],
   auth: { type: "oauth2" },

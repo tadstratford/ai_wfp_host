@@ -30,7 +30,6 @@ export const SKILL_GROUPS: SkillGroupDef[] = [
       "guardrails",
       "data-account-check",
       "report-authoring",
-      "budgeting",
     ],
     alwaysOn: true,
   },
@@ -44,16 +43,30 @@ export const SKILL_GROUPS: SkillGroupDef[] = [
   },
   {
     key: "qbo",
-    label: "QuickBooks Online",
+    label: "QBO",
     description: "Live QuickBooks Online report analysis, audit, and journaling.",
     skills: ["qbo-analysis", "qbo-audit", "qbo-journaling"],
   },
   {
+    key: "qbodemo",
+    label: "QBO Demo",
+    description:
+      "Demo-only QuickBooks company (Acme Fund Services) for budget-vs-actual and fund-allocation walkthroughs.",
+    skills: ["qbodemo-budgeting", "qbodemo-journaling"],
+  },
+  {
     key: "email-outbound",
-    label: "Outbound Email",
+    label: "Email Outbound",
     description:
       "Send outbound email, subject to the workspace outbound allowlist.",
     skills: ["email-outbound"],
+  },
+  {
+    key: "budgeting",
+    label: "Budgeting",
+    description:
+      "Budget-vs-actual planning, variance reporting, and cash forecasts.",
+    skills: ["budgeting"],
   },
 ];
 

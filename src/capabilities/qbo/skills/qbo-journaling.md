@@ -28,11 +28,15 @@ When the user asks to allocate an existing transaction (e.g., a bill, invoice, o
    - The credit total equals the debit total — the account balance is unchanged; only the class/location attribution changes.
 4. Attach the vendor (by name) to the source credit line when reclassifying an Accounts Payable bill.
 
+When the allocation is driven by a table (an allocation table of entity × month → % plus a set of amounts to allocate), do NOT compute the split yourself — call `qbo_allocation_compute` with the allocation table, the amounts, the period, the debit account, and the credit account. It computes the balanced lines deterministically (residual to the largest share) and writes them to an interim table (`staging_allocation_lines`). Read that table back with `get_data`, preview it with `show_message`, and post it with `qbo_journal_create` using `lines_source` = `staging_allocation_lines`.
+
 ## Tools needed
 - `qbo_accounts_list` — account discovery
 - `qbo_classes_list`, `qbo_locations_list` — resolve class/location names to Ids for allocations
 - `qbo_vendors_list`, `qbo_customers_list` — resolve vendor/customer names to Ids
 - `qbo_bills_list`, `qbo_invoices_list` — find the source transaction's actual amount and vendor/customer
+- `qbo_allocation_compute` — deterministic table-driven split → balanced lines → interim table
+- `get_data`, `list_data` — read the allocation table, amounts, and the computed interim table
 - `qbo_journal_create` — post the journal entry
 - `qbo_journal_entries` — verify the posted entry
 - `set_param`, `get_param` — store and retrieve the entry details
@@ -46,4 +50,5 @@ When the user asks to allocate an existing transaction (e.g., a bill, invoice, o
 - Class, location, vendor, and customer references may be supplied by exact name (case-insensitive) or QBO Id.
 - Accounts Payable lines usually require a `vendor` reference — attach one by name.
 - NEVER use a transaction/document number (Num) as a monetary amount. Amounts come from the underlying transaction total.
+- NEVER compute an allocation split yourself when a table is involved — use `qbo_allocation_compute`.
 - A "blank location" line means a line with no `location` (and no `class`) — do not invent a location name for it.

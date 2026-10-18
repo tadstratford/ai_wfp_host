@@ -12,6 +12,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { aggregator } from "../mcp/aggregator";
 import { qboCapability } from "./qbo/capability";
+import { qbodemoCapability } from "./qbodemo/capability";
 import { planningCapability } from "./planning/capability";
 import { dataCapability } from "./data/capability";
 import { metadataCapability } from "./metadata/capability";
@@ -33,6 +34,7 @@ import type { CapabilityModule } from "./types";
  *  `src/mcp/scope.ts`). */
 const CAPABILITIES: CapabilityModule[] = [
   qboCapability,
+  qbodemoCapability,
   planningCapability,
   dataCapability,
   metadataCapability,

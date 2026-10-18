@@ -17,7 +17,8 @@ import { route, type RouteDecision } from "./skillRouter";
 import { getToolParams, type ToolParam } from "../extract/schema";
 import { extractParams } from "../extract/extract";
 import { getCapabilityIndex } from "@mcp/capabilityIndex";
-import { toolsForCapability, toolNamesWhere, isReportTool } from "../../capabilities/registry";
+import { toolsForCapability, toolNamesWhere, isReportTool, listCapabilities } from "../../capabilities/registry";
+import { enabledSkillNamesForDatabase } from "../../core/skills/loader";
 import { runLoop, mcpToolsToProvider } from "./loop";
 import type { LoopResult } from "./loop";
 import { getPlanner, synthesizeStructuredArgs, resolveDataName } from "../plan";
@@ -506,6 +507,24 @@ const QBO_READ_TOOLS = toolsForCapability("qbo", ["read"]).filter(
 const PLANNING_READ_TOOLS = toolsForCapability("planning", ["read"]);
 const PLANNING_WRITE_TOOLS = toolsForCapability("planning", ["constructive-write"]);
 
+/** The set of tool names from capabilities that are DISABLED for this database.
+ *  A capability with no `group` is always-on; a grouped capability is enabled
+ *  only when its group's skills are enabled. Tools that belong to no capability
+ *  (core plumbing like show_message/chat_download/set_param/get_param) are never
+ *  in this set, so they always remain available. This is the single gate that
+ *  keeps a disabled capability's tools out of every prompt/loop/fast-path
+ *  surface without dropping core tools. */
+function disabledToolNames(databaseId: string): Set<string> {
+  const enabledSkills = enabledSkillNamesForDatabase(databaseId);
+  const out = new Set<string>();
+  for (const cap of listCapabilities()) {
+    const m = cap.manifest;
+    const enabled = !m.group || (m.skills ?? []).some((s) => enabledSkills.has(s));
+    if (!enabled) for (const t of cap.tools) out.add(t.name);
+  }
+  return out;
+}
+
 // Always-available tools — surfaced to the loop regardless of the active skills'
 // declared tools. Covers plumbing (show_message/chat_download/params), data
 // primitives, rules, QBO reads, and planning tools.
@@ -603,6 +622,7 @@ async function executeFastPath(
 ): Promise<boolean> {
   if (io.mode !== "build") return false;
   if (!FAST_PATH_TOOLS.has(toolName)) return false;
+  if (disabledToolNames(io.databaseId).has(toolName)) return false;
 
   let content: string;
   try {
@@ -1076,6 +1096,14 @@ export async function processUserMessage(
     if (entry) for (const t of entry.tools) declared.add(t);
   }
 
+  // A skill may declare a tool from a disabled capability (e.g. the core
+  // `budgeting` skill declares live qbo_* tools) — drop anything the workspace
+  // hasn't enabled so disabled capabilities never surface.
+  const disabledTools = disabledToolNames(io.databaseId);
+  for (const t of [...declared]) {
+    if (disabledTools.has(t)) declared.delete(t);
+  }
+
   // ── Phase 0: deterministic fast path ────────────────────────────────
   // Confident + read-only + fully-resolved → execute the tool directly. The
   // tool is only accepted when it is declared by the selected skills. There is
@@ -1085,7 +1113,13 @@ export async function processUserMessage(
   const complexityLow =
     !Number.isFinite(decision.complexity) || decision.complexity < 0.5;
 
-  if (decision.needsTool >= 0.5 && complexityLow && !looksQboStatement(rawMessage)) {
+  if (
+    decision.needsTool >= 0.5 &&
+    complexityLow &&
+    !looksQboStatement(rawMessage) &&
+    decision.mutating < 0.5 &&
+    !looksMutating(rawMessage)
+  ) {
     const fastPath = await resolveFastPathTool(declared, rawMessage, io.databaseId);
     if (fastPath) {
       await executeFastPath(fastPath.tool, fastPath.values, rawMessage, io);
@@ -1131,6 +1165,7 @@ export async function processUserMessage(
   const workingTools = [...capability.tools.values()].filter(
     (t) =>
       !ROUTING_TOOLS.includes(t.name) &&
+      !disabledTools.has(t.name) &&
       (declared.has(t.name) || ALWAYS_AVAILABLE.includes(t.name)),
   );
 
@@ -1148,6 +1183,7 @@ export async function processUserMessage(
       .filter(
         (t) =>
           !ROUTING_TOOLS.includes(t.name) &&
+          !disabledTools.has(t.name) &&
           (declared.has(t.name) || COMPOSABLE_PRIMITIVES.includes(t.name)),
       )
       .map((t: any) => ({ name: t.name, description: t.description || "" }));

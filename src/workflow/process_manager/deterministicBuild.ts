@@ -84,17 +84,20 @@ export function buildFromToolCalls(
     const prev = calls[i - 1];
     const next = calls[i + 1];
 
-    if (c.tool === "qbo_actuals_flat") {
+    if (c.tool === "qbo_actuals_flat" || c.tool === "qbodemo_actuals_flat") {
       const feedsLoad = next?.tool === "plan_actuals_load";
       const tp: Record<string, unknown> = {};
       if (c.args?.start_date !== undefined) tp.start_date = "{{start_date}}";
       if (c.args?.end_date !== undefined) tp.end_date = "{{end_date}}";
       if (feedsLoad) tp.store_to = FEED_LOAD_ENTRY;
-      nodes.push({ label: "Fetch QBO actuals", tool_id: "qbo_actuals_flat", tool_parameters: tp });
+      nodes.push({ label: "Fetch QBO actuals", tool_id: c.tool, tool_parameters: tp });
       continue;
     }
 
-    if (c.tool === "plan_actuals_load" && prev?.tool === "qbo_actuals_flat") {
+    if (
+      c.tool === "plan_actuals_load" &&
+      (prev?.tool === "qbo_actuals_flat" || prev?.tool === "qbodemo_actuals_flat")
+    ) {
       // Feed hand-off: drop the (large, truncated) inline items, read by name.
       nodes.push({
         label: "Load actuals into plan",
