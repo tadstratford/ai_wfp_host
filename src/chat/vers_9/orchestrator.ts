@@ -456,15 +456,15 @@ export async function processUserMessage(
   } else if (verdict.pass) {
     await io.addMessage({
       markdown:
-        `✓ Verified — satisfies ${verdict.satisfies.toFixed(2)}, complete ${verdict.complete.toFixed(2)}, accurate ${verdict.accurate.toFixed(2)}`,
-      json: { kind: "verify", pass: true, satisfies: verdict.satisfies, complete: verdict.complete, accurate: verdict.accurate },
+        `✓ Verified — satisfies ${verdict.satisfies.toFixed(2)}, complete ${verdict.complete.toFixed(2)}, accurate ${verdict.accurate.toFixed(2)}, thorough ${verdict.thorough.toFixed(2)}`,
+      json: { kind: "verify", pass: true, satisfies: verdict.satisfies, complete: verdict.complete, accurate: verdict.accurate, thorough: verdict.thorough },
     });
   } else {
     await io.addMessage({
       markdown:
         `⚠ Jev flagged this result for review (${verdict.reason}). ` +
         `Say "continue" to have the model address the gaps, or rephrase your request.`,
-      json: { kind: "verify", pass: false, satisfies: verdict.satisfies, complete: verdict.complete, accurate: verdict.accurate },
+      json: { kind: "verify", pass: false, satisfies: verdict.satisfies, complete: verdict.complete, accurate: verdict.accurate, thorough: verdict.thorough },
     });
     // Persist the gaps so a follow-up "continue" re-runs with them injected.
     try {

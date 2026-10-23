@@ -25,6 +25,17 @@ export const ROUTE_CONFIG = {
   maxSkills: 3,
 };
 
+/** The review-battery skill, force-activated on review/analyze/audit intents so
+ *  the full accountant checklist runs proactively (see data-account-check.md). */
+const REVIEW_SKILL = "data-account-check";
+
+const REVIEW_INTENT_RE =
+  /\b(review|audit|foot|reconcile|tie[- ]?out|analy[sz]e|examine|verify|check|validate)\b/i;
+
+function looksLikeReview(raw: string): boolean {
+  return REVIEW_INTENT_RE.test(raw);
+}
+
 export interface Ranked {
   name: string;
   prob: number;
@@ -215,10 +226,17 @@ export async function route(
     .sort((a, b) => b[1] - a[1])
     .map(([name, prob]) => ({ name, prob }));
 
-  const selectedSkills = (explicit ? [{ name: explicit, prob: 1 }] : rankedSkills)
+  let selectedSkills = (explicit ? [{ name: explicit, prob: 1 }] : rankedSkills)
     .filter((r) => r.prob >= ROUTE_CONFIG.skillProbThreshold)
     .slice(0, ROUTE_CONFIG.maxSkills)
     .map((r) => r.name);
+
+  // Deterministic review intent: always activate the review-battery skill on
+  // analyze/review/audit/foot/reconcile requests so the full checklist runs
+  // proactively instead of relying on Jev's probability clearing the threshold.
+  if (!explicit && looksLikeReview(rawMessage) && !selectedSkills.includes(REVIEW_SKILL)) {
+    selectedSkills = [REVIEW_SKILL, ...selectedSkills].slice(0, ROUTE_CONFIG.maxSkills + 1);
+  }
 
   const skillSummary = rankedSkills
     .slice(0, 3)

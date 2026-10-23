@@ -29,6 +29,10 @@ export interface VerifyResult {
   satisfies: number;
   complete: number;
   accurate: number;
+  /** How thoroughly the result ran the standard review categories (completeness,
+   *  existence, footing, valuation agreement, classification, cutoff, consistency,
+   *  no-guessing) rather than only the specific items the user named. */
+  thorough: number;
   /** True when every score meets its gate. */
   pass: boolean;
   /** Short human-readable reason, only when the verdict fails. */
@@ -50,12 +54,14 @@ export interface VerifyInput {
   satisfiesGate?: number;
   completeGate?: number;
   accurateGate?: number;
+  thoroughGate?: number;
 }
 
 export async function verifyResult(input: VerifyInput): Promise<VerifyResult | null> {
   const satisfiesGate = input.satisfiesGate ?? 0.6;
   const completeGate = input.completeGate ?? 0.6;
   const accurateGate = input.accurateGate ?? 0.6;
+  const thoroughGate = input.thoroughGate ?? 0.6;
 
   let key: string;
   try {
@@ -102,17 +108,23 @@ export async function verifyResult(input: VerifyInput): Promise<VerifyResult | n
       instructions:
         "Is the result internally consistent and consistent with the computed_evidence — no internal contradictions, no figures that conflict with the evidence, no unsupported claims or invented values?",
     },
+    thorough: {
+      type: "noul",
+      instructions:
+        "Did the result run the standard review categories a good accountant would — completeness, existence/orphans, footing, valuation agreement across sources, classification/allocation, cutoff/timing, consistency (clearing accounts net to zero, consistent naming), and no-guessing — rather than only addressing the specific items the user named?",
+    },
   };
 
   const { response } = await askClassifier(state, questions, { apiKey: key });
   const satisfies = (response.answers.satisfies as NoulAnswer).noul;
   const complete = (response.answers.complete as NoulAnswer).noul;
   const accurate = (response.answers.accurate as NoulAnswer).noul;
+  const thorough = (response.answers.thorough as NoulAnswer).noul;
 
-  const pass = satisfies >= satisfiesGate && complete >= completeGate && accurate >= accurateGate;
+  const pass = satisfies >= satisfiesGate && complete >= completeGate && accurate >= accurateGate && thorough >= thoroughGate;
   const reason = pass
     ? undefined
-    : `satisfies ${satisfies.toFixed(2)}, complete ${complete.toFixed(2)}, accurate ${accurate.toFixed(2)}`;
+    : `satisfies ${satisfies.toFixed(2)}, complete ${complete.toFixed(2)}, accurate ${accurate.toFixed(2)}, thorough ${thorough.toFixed(2)}`;
 
-  return { satisfies, complete, accurate, pass, reason };
+  return { satisfies, complete, accurate, thorough, pass, reason };
 }
