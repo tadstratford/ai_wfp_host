@@ -5,5 +5,6 @@ import resolveDataShape from "./resolve_data_shape";
 import deleteData from "./delete_data";
 import saveData from "./save_data";
 import reportTable from "./report_table";
+import compareData from "./compare_data";
 
-export const tools = [listData, getData, aggregateData, resolveDataShape, deleteData, saveData, reportTable];
+export const tools = [listData, getData, aggregateData, resolveDataShape, deleteData, saveData, reportTable, compareData];

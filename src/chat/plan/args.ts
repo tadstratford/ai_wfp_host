@@ -46,6 +46,52 @@ export function resolveDataName(
   return matches.size === 1 ? [...matches][0] : null;
 }
 
+/** Tokens that are generic across datasets and never identify a specific file
+ *  (so "the report" doesn't match every file with "report" in its name). */
+const GENERIC_DATA_TOKENS = new Set([
+  "report", "reports", "data", "file", "files", "sheet", "summary", "analysis",
+  "workspace", "table", "tables", "results", "staging", "the", "and", "for",
+  "all", "give", "show", "me", "my", "with", "of", "in", "on", "a", "an",
+  "this", "that", "those", "these", "include", "includes", "analyze", "analyse",
+]);
+
+/** Resolve every data file the request references, deterministically, by name.
+ *
+ *  Unlike `resolveDataName` (single-match, null on ambiguity), this returns ALL
+ *  files the request names — the "give me all the X data" case. A file matches
+ *  when its full normalized name appears in the request, or when one of its
+ *  distinctive (non-generic, ≥3-char) name tokens appears as a whole token in
+ *  the request (exact-token equality, so "catalog" never matches "cat"). */
+export function resolveDataNames(
+  text: string,
+  inventory: { name: string }[],
+): string[] {
+  if (inventory.length === 0) return [];
+  if (inventory.length === 1) return [inventory[0].name];
+
+  const t = norm(text);
+  const requestTokens = new Set(
+    t.split(" ").map((tok) => tok.replace(/[^a-z0-9]/g, "")).filter((tok) => tok.length >= 3),
+  );
+
+  const found = new Set<string>();
+  for (const entry of inventory) {
+    const n = norm(entry.name);
+    if (n.length >= 3 && t.includes(n)) {
+      found.add(entry.name);
+      continue;
+    }
+    const distinctive = n
+      .split(" ")
+      .map((tok) => tok.replace(/[^a-z0-9]/g, ""))
+      .filter((tok) => tok.length >= 3 && !GENERIC_DATA_TOKENS.has(tok));
+    if (distinctive.some((tok) => requestTokens.has(tok))) {
+      found.add(entry.name);
+    }
+  }
+  return [...found];
+}
+
 /** Columns mentioned in `snippet`.
  *  1) Full normalized name (longest first, each match removed so a short name
  *     "Account" doesn't fire inside a longer one "GL Account").

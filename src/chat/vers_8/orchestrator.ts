@@ -531,6 +531,7 @@ function disabledToolNames(databaseId: string): Set<string> {
 const ALWAYS_AVAILABLE = [
   "show_message", "chat_download", "set_param", "get_param", "save_data",
   "list_data", "get_data", "aggregate_data", "resolve_data_shape", "judge_data",
+  "compare_data",
   "report_table", "report_qbo_pnl", "report_qbo_bs",
   "list_rules", "get_rule",
   "create_rule", "update_rule", "delete_rule",
@@ -546,7 +547,7 @@ const ALWAYS_AVAILABLE = [
 // build-loop fallback still uses the full ALWAYS_AVAILABLE set.
 const COMPOSABLE_PRIMITIVES = [
   "get_data", "list_data", "resolve_data_shape", "aggregate_data", "judge_data",
-  "check_data", "save_data", "set_param", "get_param",
+  "check_data", "compare_data", "save_data", "set_param", "get_param",
   "report_table", "report_qbo_pnl", "report_qbo_bs", "report_plan_variance", "report_plan_cash_forecast",
   "chat_download", "show_message",
 ];
@@ -568,9 +569,9 @@ function renderSystem(): string {
   return `Today's date is ${new Date().toISOString().slice(0, 10)}.\n\n${RENDER_SYSTEM_BASE}`;
 }
 
-/** Resolve a data-file reference and synthesize structured args for a fast-path
- *  tool. The flat `extractParams` can't fill `name`/`measures`/`group_by`, so
- *  read tools like `aggregate_data` would otherwise always skip the fast path. */
+/** Resolve a data-file reference and synthesize structured args for a trivial
+ *  one-step plan. The flat `extractParams` can't fill `name`/`measures`/`group_by`,
+ *  so read tools like `aggregate_data` would otherwise always resolve to null. */
 async function fillFastPathArgs(
   toolId: string,
   rawMessage: string,
@@ -605,7 +606,7 @@ async function fillFastPathArgs(
       if (out[k] === undefined) out[k] = v;
     }
     console.log(
-      `[vers_8] fast-path args ${toolId}: data=${resolvedDataName} ` +
+      `[vers_8] trivial-plan args ${toolId}: data=${resolvedDataName} ` +
         `columns=${JSON.stringify(columns)} synthesized=${JSON.stringify(synthesized)}`,
     );
   } catch (err: any) {
@@ -614,74 +615,24 @@ async function fillFastPathArgs(
   return out;
 }
 
-async function executeFastPath(
-  toolName: string,
-  values: Record<string, unknown>,
+/** Deterministic one-step plan for a confident, read-only, single-tool request
+ *  (the former "fast path", now expressed as a plan so it flows through the same
+ *  show-steps → gate → execute → summarize methodology as every other request).
+ *  Returns null when no fast-path tool's required args all resolve. */
+async function resolveTrivialPlan(
+  declared: Set<string>,
   rawMessage: string,
-  io: OrchestratorIO,
-): Promise<boolean> {
-  if (io.mode !== "build") return false;
-  if (!FAST_PATH_TOOLS.has(toolName)) return false;
-  if (disabledToolNames(io.databaseId).has(toolName)) return false;
-
-  let content: string;
-  try {
-    const mcpResult = await aggregator.callTool(toolName, values);
-    content = extractTextContent(mcpResult);
-  } catch (err: any) {
-    console.warn(
-      `[vers_8] Fast path tool ${toolName} error: ${err.message}`,
-    );
-    return false;
-  }
-
-  await io.addMessage({
-    markdown: `> _\`${toolName}\` (fast path)_`,
-    json: { tool: toolName, fastPath: true },
-  });
-
-  let replyText = "";
-  try {
-    const reply = await callProvider(
-      io.databaseId,
-      {
-        system: renderSystem(),
-        messages: [
-          {
-            role: "user",
-            content: `User request: ${rawMessage}\n\nTool result from ${toolName}:\n${content.slice(0, 24000)}`,
-          },
-        ],
-        maxTokens: 2000,
-        temperature: 0.2,
-      },
-      {
-        sessionId: io.sessionId,
-        userId: io.userId,
-        mode: io.mode,
-        phase: "render",
-      },
-    );
-    replyText = reply.text || "";
-  } catch (err: any) {
-    console.warn(`[vers_8] Fast path render error: ${err.message}`);
-  }
-
-  if (replyText) {
-    await io.addMessage({ markdown: replyText, json: { kind: "reply", fastPath: true } });
-  } else if (content) {
-    await io.addMessage({
-      markdown: content.slice(0, 4000),
-      json: { kind: "reply", fastPath: true, raw: true },
-    });
-  }
-
-  await persistLastRequest(io.databaseId, io.sessionId, {
-    tool: toolName,
-    params: values,
-    rawMessage,
-  });
-  return true;
+  databaseId: string,
+): Promise<PlanResult | null> {
+  const fast = await resolveFastPathTool(declared, rawMessage, databaseId);
+  if (!fast) return null;
+  return {
+    kind: "plan",
+    plan: {
+      steps: [{ tool_id: fast.tool, tool_parameters: fast.values, label: fast.tool }],
+    },
+    missingRequired: [],
+  };
 }
 
 /** Render a concise natural-language summary after a composed plan runs — the
@@ -732,9 +683,13 @@ async function runPlan(
 ): Promise<void> {
   const skillNames = selectedSkills.join(", ");
   await io.addMessage({ markdown: `> _Running ${skillNames}..._`, json: { kind: "meta" } });
-  const messagesBefore = (session?.messages ?? []).length;
-  await executePlanInSession(io.databaseId, session, plan);
-  const stream = ((session?.messages ?? []) as any[])
+  // `io.addMessage` writes to its own (re-fetched) session copy, so re-fetch here
+  // so the executor operates on the session that already contains the "Running"
+  // message — otherwise its per-step saves would clobber it.
+  const execSession = (await getSession(io.databaseId, io.sessionId)) ?? session;
+  const messagesBefore = (execSession?.messages ?? []).length;
+  await executePlanInSession(io.databaseId, execSession, plan);
+  const stream = ((execSession?.messages ?? []) as any[])
     .slice(messagesBefore)
     .map((m) => (typeof m.markdown === "string" ? m.markdown : ""))
     .filter((s) => s.trim().length > 0)
@@ -746,6 +701,24 @@ async function runPlan(
     await renderPlanSummary(io, rawMessage, plan, stream);
   }
   await auditChatPlan(io, stream);
+
+  // Honest execution summary — the rules audit above only checks rule
+  // compliance, not whether the steps actually completed.
+  const planExec = (execSession?.metadata as any)?.planExecution as
+    | { completed?: boolean; total?: number; failedLabel?: string }
+    | undefined;
+  if (planExec?.completed) {
+    await io.addMessage({
+      markdown: `✓ Completed — ${planExec.total ?? plan.steps.length} steps`,
+      json: { kind: "plan-summary", status: "completed" },
+    });
+  } else if (planExec?.failedLabel) {
+    await io.addMessage({
+      markdown: `✗ Stopped at "${planExec.failedLabel}" — see the error above.`,
+      json: { kind: "plan-summary", status: "failed" },
+    });
+  }
+
   await persistToolCalls(
     io.databaseId,
     io.sessionId,
@@ -794,10 +767,10 @@ async function recordAnalysis(
 }
 
 const AUDIT_STATUS_LABELS: Record<string, string> = {
-  no_errors: "Plan ran with no Errors",
-  broke_workspace_rule: "Plan broke a Workspace rule",
-  broke_presented_rule: "Plan broke a presented rule",
-  audit_unavailable: "Plan audit could not run (no classifier key)",
+  no_errors: "Rules check passed",
+  broke_workspace_rule: "Broke a Workspace rule",
+  broke_presented_rule: "Broke a presented rule",
+  audit_unavailable: "Rules check could not run (no classifier key)",
 };
 
 /** Fail-closed rule audit for a chat-composed plan — checks the run stream
@@ -859,6 +832,7 @@ async function tryFollowUpCarryForward(
   lastReq: LastRequest | undefined,
   rawMessage: string,
   io: OrchestratorIO,
+  session: any,
 ): Promise<boolean> {
   if (!lastReq?.tool) return false;
   const params = await getToolParams(lastReq.tool);
@@ -878,7 +852,15 @@ async function tryFollowUpCarryForward(
   console.log(
     `[vers_8] Follow-up → re-running ${lastReq.tool} with ${JSON.stringify(merged)}`,
   );
-  await executeFastPath(lastReq.tool, merged, rawMessage, io);
+  const skills = (session?.metadata as any)?.lastActiveSkills ?? [];
+  await runPlan(io, session, rawMessage, {
+    steps: [{ tool_id: lastReq.tool, tool_parameters: merged, label: lastReq.tool }],
+  }, skills);
+  await persistLastRequest(io.databaseId, io.sessionId, {
+    tool: lastReq.tool,
+    params: merged,
+    rawMessage,
+  });
   return true;
 }
 
@@ -1014,7 +996,7 @@ export async function processUserMessage(
 
   if (
     isFollowUp(rawMessage) &&
-    (await tryFollowUpCarryForward(lastReq, rawMessage, io))
+    (await tryFollowUpCarryForward(lastReq, rawMessage, io, session))
   ) {
     return;
   }
@@ -1062,7 +1044,7 @@ export async function processUserMessage(
   // longer rephrasings). Same carry-forward as the heuristic gate.
   if (
     decision.followUp >= 0.6 &&
-    (await tryFollowUpCarryForward(lastReq, rawMessage, io))
+    (await tryFollowUpCarryForward(lastReq, rawMessage, io, session))
   ) {
     return;
   }
@@ -1104,29 +1086,9 @@ export async function processUserMessage(
     if (disabledTools.has(t)) declared.delete(t);
   }
 
-  // ── Phase 0: deterministic fast path ────────────────────────────────
-  // Confident + read-only + fully-resolved → execute the tool directly. The
-  // tool is only accepted when it is declared by the selected skills. There is
-  // no Jev tool ranking — scan the declared fast-path tools and run the first
-  // whose required params all resolve deterministically.
-
-  const complexityLow =
-    !Number.isFinite(decision.complexity) || decision.complexity < 0.5;
-
-  if (
-    decision.needsTool >= 0.5 &&
-    complexityLow &&
-    !looksQboStatement(rawMessage) &&
-    decision.mutating < 0.5 &&
-    !looksMutating(rawMessage)
-  ) {
-    const fastPath = await resolveFastPathTool(declared, rawMessage, io.databaseId);
-    if (fastPath) {
-      await executeFastPath(fastPath.tool, fastPath.values, rawMessage, io);
-      console.log("[vers_8] Fast path handled the request.\n");
-      return;
-    }
-  }
+  // (The former "deterministic fast path" is gone — a confident, read-only,
+  // single-tool request now resolves to a one-step plan in the plan path below,
+  // so every request uses the same show-steps → gate → execute methodology.)
 
   if (routedSkills.length === 0) {
     // No task skill matched. If a previous turn left a resumable transcript and
@@ -1156,9 +1118,7 @@ export async function processUserMessage(
   // returned above.
   const mutatingRequest =
     !isInformationalQuestion(rawMessage) &&
-    (decision.mutating >= 0.5 ||
-      looksMutating(rawMessage) ||
-      [...declared].some((t) => WRITE_TOOLS.has(t)));
+    (decision.mutating >= 0.5 || looksMutating(rawMessage));
 
   // ── Phase 2: Build the loop with the skills' declared tools ─────────
   const ROUTING_TOOLS = ["select_skill", "list_skills"];
@@ -1188,50 +1148,44 @@ export async function processUserMessage(
       )
       .map((t: any) => ({ name: t.name, description: t.description || "" }));
 
-    let planResult: PlanResult;
-    // Clarified values from a prior turn's ask, handed to the planner so it can
-    // consume them by name (workflow-style) instead of only re-parsing text.
-    const sessionMetaForPlan = (session?.metadata as any) ?? {};
-    const clarifiedParams: Record<string, unknown> =
-      sessionMetaForPlan.clarifiedParams ?? {};
-    if (sessionMetaForPlan.clarifiedParams) {
-      delete sessionMetaForPlan.clarifiedParams;
-      saveSession(io.databaseId, session).catch(() => {});
-    }
-    try {
-      const planner = getPlanner();
-      planResult = await planner.plan({
-        databaseId: io.databaseId,
-        userId: io.userId,
-        rawMessage,
-        tools: composeRoster,
-        activeSkills: selectedSkills,
-        lastRequest: lastReq?.rawMessage,
-        analysisHistory: (session?.metadata as any)?.analysisHistory,
-        complexity: decision.complexity,
-        mutating: decision.mutating,
-        clarifiedParams,
-      });
-    } catch (err: any) {
-      console.warn(`[vers_8] Plan path failed (falling back to build loop): ${err.message}`);
-      planResult = { kind: "fallback", reason: `planner threw: ${err.message}` };
-    }
+    // ── Deterministic trivial-plan lane ────────────────────────────────
+    // A confident, read-only, single-tool request ("list my data", "show me the
+    // invoices") resolves to a one-step plan with NO Jev classify and NO LLM
+    // call — it reuses the deterministic arg resolver the old fast path used.
+    // The plan then flows through the same show-steps → gate → execute path
+    // below, so there is one plan methodology for every request.
+    const complexityLow =
+      !Number.isFinite(decision.complexity) || decision.complexity < 0.5;
+    const trivialPlan: PlanResult | null =
+      io.mode === "build" &&
+      decision.needsTool >= 0.5 &&
+      complexityLow &&
+      !looksQboStatement(rawMessage) &&
+      decision.mutating < 0.5 &&
+      !looksMutating(rawMessage)
+        ? await resolveTrivialPlan(declared, rawMessage, io.databaseId)
+        : null;
 
-    // ── Universal LLM planner fallback ─────────────────────────────────
-    // When the deterministic templates can't compose the request, ask the LLM
-    // planner to produce a plan over the full working roster. This guarantees
-    // every request yields a plan to show/approve instead of a plan-less gate.
-    if (planResult.kind === "fallback" && !planResult.preferLoop) {
-      const workingRoster = workingTools.map((t: any) => ({
-        name: t.name,
-        description: t.description || "",
-      }));
+    let planResult: PlanResult;
+    if (trivialPlan) {
+      planResult = trivialPlan;
+    } else {
+      // Clarified values from a prior turn's ask, handed to the planner so it can
+      // consume them by name (workflow-style) instead of only re-parsing text.
+      const sessionMetaForPlan = (session?.metadata as any) ?? {};
+      const clarifiedParams: Record<string, unknown> =
+        sessionMetaForPlan.clarifiedParams ?? {};
+      if (sessionMetaForPlan.clarifiedParams) {
+        delete sessionMetaForPlan.clarifiedParams;
+        saveSession(io.databaseId, session).catch(() => {});
+      }
       try {
-        planResult = await llmPlanner.plan({
+        const planner = getPlanner();
+        planResult = await planner.plan({
           databaseId: io.databaseId,
           userId: io.userId,
           rawMessage,
-          tools: workingRoster,
+          tools: composeRoster,
           activeSkills: selectedSkills,
           lastRequest: lastReq?.rawMessage,
           analysisHistory: (session?.metadata as any)?.analysisHistory,
@@ -1240,7 +1194,35 @@ export async function processUserMessage(
           clarifiedParams,
         });
       } catch (err: any) {
-        console.warn(`[vers_8] LLM planner failed: ${err.message}`);
+        console.warn(`[vers_8] Plan path failed (falling back to build loop): ${err.message}`);
+        planResult = { kind: "fallback", reason: `planner threw: ${err.message}` };
+      }
+
+      // ── Universal LLM planner fallback ───────────────────────────────
+      // When the deterministic templates can't compose the request, ask the LLM
+      // planner to produce a plan over the full working roster. This guarantees
+      // every request yields a plan to show/approve instead of a plan-less gate.
+      if (planResult.kind === "fallback" && !planResult.preferLoop) {
+        const workingRoster = workingTools.map((t: any) => ({
+          name: t.name,
+          description: t.description || "",
+        }));
+        try {
+          planResult = await llmPlanner.plan({
+            databaseId: io.databaseId,
+            userId: io.userId,
+            rawMessage,
+            tools: workingRoster,
+            activeSkills: selectedSkills,
+            lastRequest: lastReq?.rawMessage,
+            analysisHistory: (session?.metadata as any)?.analysisHistory,
+            complexity: decision.complexity,
+            mutating: decision.mutating,
+            clarifiedParams,
+          });
+        } catch (err: any) {
+          console.warn(`[vers_8] LLM planner failed: ${err.message}`);
+        }
       }
     }
 
@@ -1266,13 +1248,24 @@ export async function processUserMessage(
     if (planResult.kind === "plan" && planResult.plan.steps.length > 0) {
       // Show the steps FIRST, then gate approval (mutating only), then execute —
       // so the user sees where the run is going before approving.
-      const stepList = planResult.plan.steps
-        .map((s, i) => `${i + 1}. ${s.label || s.tool_id}`)
-        .join("\n");
-      await io.addMessage({ markdown: `**Steps**\n${stepList}`, json: { kind: "plan" } });
+      const steps = planResult.plan.steps.map((s) => ({
+        label: s.label || s.tool_id,
+        tool_id: s.tool_id,
+      }));
+      const stepList = steps.map((s, i) => `${i + 1}. ${s.label}`).join("\n");
+      await io.addMessage({
+        markdown: `**Steps**\n${stepList}`,
+        json: { kind: "plan", planId: `plan-${Date.now().toString(36)}`, steps },
+      });
 
       const wmeta = (session?.metadata as any) ?? {};
-      if (io.mode === "build" && mutatingRequest && !wmeta.writeApproved) {
+      // The gate keys off the ACTUAL plan's tools (a write tool anywhere in the
+      // plan), not the skill's declared roster — so a read-only plan (e.g. a
+      // trivial list_data/get_data) never demands approval.
+      const planWrites = planResult.plan.steps.some((s) =>
+        WRITE_TOOLS.has(s.tool_id),
+      );
+      if (io.mode === "build" && (mutatingRequest || planWrites) && !wmeta.writeApproved) {
         await io.addMessage({
           markdown: "This request will create, modify, or send data. Use the **Approve** button below to continue, or **Cancel**.",
           json: { approval: true },
@@ -1432,10 +1425,10 @@ function truncateToolResult(full: string): string {
   );
 }
 
-/** Deterministically pick the fast-path tool (replaces Jev's `topTool` ranking).
- *  Scans the selected skills' declared tools for one in the fast-path allowlist
- *  whose required parameters all resolve from the request text, returning the
- *  first fully-resolved candidate. */
+/** Deterministically pick the tool for a trivial one-step plan. Scans the
+ *  selected skills' declared tools for one in the read-only allowlist whose
+ *  required parameters all resolve from the request text, returning the first
+ *  fully-resolved candidate. */
 async function resolveFastPathTool(
   declared: Set<string>,
   rawMessage: string,

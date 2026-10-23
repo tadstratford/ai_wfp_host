@@ -5,6 +5,7 @@ import {
   extractGroupBy,
   synthesizeMeasures,
   synthesizeStructuredArgs,
+  resolveDataNames,
 } from "./args";
 
 describe("matchColumnNames", () => {
@@ -119,5 +120,40 @@ describe("synthesizeMeasures", () => {
       column: "Amount",
       fn: "sum",
     });
+  });
+});
+
+describe("resolveDataNames", () => {
+  const inventory = [
+    { name: "alpha_transactions" },
+    { name: "alpha_estimates" },
+    { name: "gamma_report_sheet1" },
+    { name: "staging_alpha_transactions_summary" },
+  ];
+
+  it("matches every file sharing a named token (the 'all X data' case)", () => {
+    expect(resolveDataNames("give me all the alpha transaction data", inventory)).toEqual([
+      "alpha_transactions",
+      "alpha_estimates",
+      "staging_alpha_transactions_summary",
+    ]);
+  });
+
+  it("matches multiple distinct names in one request", () => {
+    expect(resolveDataNames("analyze the alpha transactions and the gamma report", inventory)).toEqual([
+      "alpha_transactions",
+      "alpha_estimates",
+      "gamma_report_sheet1",
+      "staging_alpha_transactions_summary",
+    ]);
+  });
+
+  it("does not substring-match a short token inside another word", () => {
+    // "catalog" must NOT match a file named "cat_data" ("cat" ≠ "catalog").
+    expect(resolveDataNames("analyze the catalog", [{ name: "cat_data" }, { name: "other" }])).toEqual([]);
+  });
+
+  it("does not match a generic token like 'report'", () => {
+    expect(resolveDataNames("show me the report", [{ name: "q1_report" }, { name: "annual_report" }])).toEqual([]);
   });
 });

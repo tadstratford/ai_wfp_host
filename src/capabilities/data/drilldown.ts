@@ -15,6 +15,8 @@ export interface DrilldownReportInput {
   groupBy: string[];
   detailColumns: string[];
   sources: string[];
+  /** Optional provenance notes (e.g. a workspace rule that was applied). */
+  notes?: string[];
 }
 
 export const BRAND_CSS = `
@@ -39,6 +41,7 @@ body{margin:0;background:var(--wfp-bg);color:var(--wfp-ink);
 .provenance .tag{flex:none;font-weight:600;text-transform:uppercase;letter-spacing:.04em;
   font-size:11px;padding:2px 8px;border-radius:999px}
 .provenance .tag.det{background:#ecfdf5;color:#047857}
+.provenance .rule-note{display:block;width:100%;margin-top:8px;padding-top:8px;border-top:1px dashed var(--wfp-line)}
 table.main{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--wfp-line);border-radius:10px;overflow:hidden}
 table.main th{background:#fafafe;text-align:left;padding:10px 12px;font-size:12px;
   text-transform:uppercase;letter-spacing:.03em;color:var(--wfp-muted);border-bottom:1px solid var(--wfp-line)}
@@ -87,16 +90,20 @@ function groupKeyOf(row: Record<string, unknown>, groupBy: string[]): string {
 }
 
 export function buildDrilldownReportHtml(input: DrilldownReportInput): string {
-  const { workspace, title, summaryRows, detailRows, groupBy, detailColumns, sources } = input;
+  const { workspace, title, summaryRows, detailRows, groupBy, detailColumns, sources, notes } = input;
 
   const when = new Date().toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" });
   const sourceLine = sources.map((s) => esc(s)).join(", ") || "None";
+  const notesLine = (notes ?? [])
+    .filter((n) => n && n.trim().length > 0)
+    .map((n) => `<span class="rule-note">${esc(n)}</span>`)
+    .join("");
 
   const header = `<section class="report-context">
     <div class="eyebrow">${esc(workspace)}</div>
     <h1>${esc(title)}</h1>
     <div class="meta"><span><b>Generated:</b> ${esc(when)}</span><span><b>Sources:</b> ${sourceLine}</span></div>
-    <div class="provenance"><span class="tag det">Deterministic</span><span>All figures were computed deterministically — no AI was used to produce the numbers in this report.</span></div>
+    <div class="provenance"><span class="tag det">Deterministic</span><span>All figures were computed deterministically — no AI was used to produce the numbers in this report.</span>${notesLine}</div>
   </section>`;
 
   const emptyBody = `<p style="color:var(--wfp-muted)">No data to display.</p>`;

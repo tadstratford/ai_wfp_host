@@ -3,6 +3,7 @@
 // over a large dataset without ever materializing typed rows in bulk.
 
 import { parseNumber, scanDataRows, type StagedLarge } from "./stage";
+import { cellRowMatches, type FilterClause } from "./filter";
 
 export type AggregateFn = "sum" | "count" | "avg" | "min" | "max";
 
@@ -127,19 +128,24 @@ export function aggregateCells(
 }
 
 /** Aggregate a large CSV in one streaming pass (skipping report scaffolding,
- *  forward-filling continuation rows), without materializing typed rows. */
+ *  forward-filling continuation rows), without materializing typed rows. An
+ *  optional `filter` excludes rows before grouping (deterministic predicate). */
 export function aggregateLarge(
   content: string,
   staged: StagedLarge,
   groupBy: string[],
   measures: AggregateMeasure[],
   limit = 50,
+  filter?: FilterClause[],
 ): { groups: AggregateGroup[]; totalGroups: number } {
   const cellRows: string[][] = [];
   scanDataRows(
     content,
     { headerIndex: staged.headerIndex, keyColumns: staged.keyColumns },
     (cells) => {
+      if (filter && filter.length > 0 && !cellRowMatches(staged.columns, cells, filter)) {
+        return;
+      }
       cellRows.push(cells);
     },
   );

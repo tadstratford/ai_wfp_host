@@ -734,34 +734,47 @@ export const executePlanInSession = async (
   }
 
   let step = 0;
+  let failedIndex: number | undefined;
+  let failedLabel: string | undefined;
   for (const s of steps) {
     step++;
+    const index = step - 1;
+    const label = s.label || s.tool_id;
     const node: WorkflowNode = {
       id: `plan-${Date.now().toString(36)}-${step}`,
       type: "tool",
-      label: s.label || s.tool_id,
+      label,
       step_order: step,
       tool_id: s.tool_id,
       tool_parameters: s.tool_parameters,
     };
 
-    // Persistent step marker — shows in the chat stream right before the step
-    // runs, so the user can follow progress against the up-front plan list.
-    const safeStepLabel = escapeHtml(s.label || s.tool_id);
-    session.messages.push({
-      id: `step-${Date.now().toString(36)}-${step}`,
+    // Live checklist status — the chat renders the up-front plan as a checklist
+    // and updates each entry from these `step-status` messages.
+    const statusMsg = (status: "running" | "done" | "error") => ({
+      id: `plan-status-${Date.now().toString(36)}-${step}-${status}`,
       role: "assistant",
       source: "plan_executor",
-      html: `<div class="flex items-center gap-2 text-sm text-ink-500 dark:text-ink-400 py-1"><span class="font-semibold text-ink-400 dark:text-white/50">Step ${step}</span><span class="font-mono">${safeStepLabel}</span></div>`,
-      markdown: `Step ${step} \u00b7 \`${s.label || s.tool_id}\``,
+      html: "",
+      markdown: "",
       timestamp: new Date(),
-      json: { kind: "step", tool: s.tool_id },
+      json: { kind: "step-status", index, status, label },
     } as any);
+    session.messages.push(statusMsg("running"));
     await saveSession(databaseId, session);
     notifyClients(session.session_id, "new_message");
 
     const { hasError } = await executeNode(databaseId, node, session, "");
+    // Persist + broadcast the final status too — otherwise the last step's
+    // "done"/"error" only lives in memory (the next step's "running" save used
+    // to be the only thing that flushed it), so the checklist's final item
+    // would stick at "running" forever.
+    session.messages.push(statusMsg(hasError ? "error" : "done"));
+    await saveSession(databaseId, session);
+    notifyClients(session.session_id, "new_message");
     if (hasError) {
+      failedIndex = index;
+      failedLabel = label;
       console.log(`[executePlanInSession] Step "${node.label}" failed — stopping plan`);
       break;
     }
@@ -770,6 +783,17 @@ export const executePlanInSession = async (
       break;
     }
   }
+
+  // Record the execution outcome so the orchestrator can report honestly
+  // (rather than printing a misleading "no errors" from the rules audit).
+  session.metadata = session.metadata || {};
+  (session.metadata as any).planExecution = {
+    completed: failedIndex === undefined && !session.waitingForInput,
+    total: steps.length,
+    failedIndex,
+    failedLabel,
+  };
+  await saveSession(databaseId, session);
 
   return session;
 };

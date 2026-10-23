@@ -9,6 +9,7 @@
  */
 
 import { loadAppSkills } from "../../core/skills/loader";
+import { dataFileNames, ruleBriefLines } from "../context/workspace";
 import { askClassifier } from "@shared/typesafe/openRouter";
 import type { ChoiceAnswer, NoulAnswer, ScoreAnswer, Question } from "@shared/typesafe/types";
 import { getClassifierKey } from "@backend/core/user/getLLMApiKey";
@@ -84,6 +85,10 @@ export async function route(
     lastRequest: context?.lastRequest?.rawMessage ?? null,
     lastTool: context?.lastTool ?? null,
     activeSkills: context?.activeSkills ?? [],
+    // Rule + data-file visibility makes routing rule-aware (e.g. an account-
+    // coding rule can steer "analyze this data" toward data-account-check).
+    data_files: dataFileNames(databaseId),
+    workspace_rules: ruleBriefLines(databaseId),
   };
 
   const questions: Record<string, Question> = {

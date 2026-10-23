@@ -20,7 +20,7 @@
  */
 
 import { askClassifier } from "@shared/typesafe/openRouter";
-import type { ChoiceAnswer, NoulAnswer, Question } from "@shared/typesafe/types";
+import type { NoulAnswer, Question } from "@shared/typesafe/types";
 import { getClassifierKey } from "@backend/core/user/getLLMApiKey";
 import { z } from "zod";
 import { callStructured } from "@backend/core/llm/structured";
@@ -29,7 +29,10 @@ import { listCapabilities } from "@capabilities/registry";
 import { enabledSkillNamesForDatabase } from "@core/skills/loader";
 import { loadPrivacyMap } from "@backend/core/knowledge/index";
 import { maskText, discoverRequestValues } from "@backend/core/knowledge/autoMask";
-import { resolveDataName } from "./args";
+import { loadRules } from "@rules/loader";
+import { ruleBriefLines } from "../context/workspace";
+import { FilterClauseSchema, type FilterClause } from "@data/filter";
+import { resolveDataNames } from "./args";
 import { getToolParams } from "../extract/schema";
 import { extractParams } from "../extract/extract";
 import type { NodePlan, PlanStep } from "./types";
@@ -38,9 +41,9 @@ import type { Planner, PlanRequest, PlanResult } from "./planner";
 /** Classifier noul answers, keyed by noul id. */
 type Flags = Record<string, boolean>;
 
-/** Per-request context shared across shapes (currently just the data-file pick). */
+/** Per-request context shared across shapes (currently the data-file pick). */
 interface ShapeContext {
-  dataFile: string | null;
+  dataFiles: string[];
 }
 
 /** A declarative shape: how to classify it, when it owns the request, and how
@@ -74,7 +77,6 @@ const AnalysisArgsSchema = z.object({
 });
 
 const N = 0.5; // noul → boolean threshold
-const DATA_NONE_SENTINEL = "__none__";
 
 /** True when the request back-references the prior turn's result. */
 function referencesPrior(rawMessage: string): boolean {
@@ -115,6 +117,7 @@ async function llmFillAnalysisArgs(
   source: string,
   columns: string[],
   flags: Flags,
+  filter?: FilterClause[],
 ): Promise<AnalysisArgs> {
   const wanted: string[] = [];
   if (flags.aggregate || flags.report) wanted.push("group_by", "measures");
@@ -128,7 +131,8 @@ async function llmFillAnalysisArgs(
     'array of {column, fn} with fn one of "sum"/"count"/"avg"/"min"/"max" over numeric columns, ' +
     '"checks" is an array of {id, question} with 3-5 broad yes/no questions about the DATASET as a whole ' +
     '(e.g. {id:"missing_gl_account", question:"Are any rows missing a GL Account?"}) — not per-row questions, ' +
-    '"title" is a short report title, and "detail_columns" is an array of columns to show in the drill-down.';
+    '"title" is a short report title (name THIS data file, not the whole request), and ' +
+    '"detail_columns" is an array of columns to show in the drill-down.';
 
   const user =
     `User request: ${req.rawMessage}\n` +
@@ -148,7 +152,85 @@ async function llmFillAnalysisArgs(
     callOpts: { userId: req.userId, mode: "chat", phase: "plan-args" },
   });
 
-  return res ?? {};
+  const args: AnalysisArgs = res ?? {};
+
+  // A column the filter already pins to a single value (eq / in) is degenerate
+  // as a group-by — every row shares it. Drop it so the report isn't one group.
+  const pinned = new Set(
+    (filter ?? []).filter((c) => c.op === "eq" || c.op === "in").map((c) => c.column),
+  );
+  if (args.group_by && args.group_by.some((g) => pinned.has(g))) {
+    args.group_by = args.group_by.filter((g) => !pinned.has(g));
+  }
+
+  return args;
+}
+
+/** Structured output for rule→predicate resolution. */
+const RulePredicateSchema = z.object({
+  matched: z.boolean(),
+  rule_name: z.string().optional(),
+  statement: z.string().optional(),
+  predicate: z.array(FilterClauseSchema).optional(),
+});
+
+/** True when the request references a workspace rule, by the word "rule" or a
+ *  rule's own name/tags (so "apply the X policy" also resolves). */
+function referencesRule(raw: string, rules: { name: string; tags?: string[] }[]): boolean {
+  if (/\brule(s)?\b/i.test(raw)) return true;
+  const t = raw.toLowerCase();
+  return rules.some((r) => {
+    const names = [r.name, ...(r.tags ?? [])].map((n) => n.toLowerCase()).filter((n) => n.length >= 3);
+    return names.some((n) => t.includes(n));
+  });
+}
+
+/** One scoped LLM call resolves a referenced workspace rule into a deterministic
+ *  filter predicate (grounded in the real columns) + a plain-language statement
+ *  for the report's provenance band. Fail-closed: returns null when the model
+ *  can't produce a schema-conforming result (the caller then asks the user). */
+async function resolveRulePredicate(
+  req: PlanRequest,
+  rules: { name: string; description?: string; content: string }[],
+  columns: string[],
+): Promise<{
+  matched: boolean;
+  rule_name?: string;
+  statement?: string;
+  predicate?: FilterClause[];
+} | null> {
+  const system =
+    "You resolve a workspace rule into a deterministic row-filter predicate and a plain-language statement. " +
+    "Return ONLY the structured JSON via the forced tool. " +
+    '"predicate" is an array of {column, op, value} clauses that, ANDed together, keep exactly the rows the rule describes. ' +
+    'op is one of: eq, ne, gt, gte, lt, lte, contains, not_contains, in, is_empty, not_empty. ' +
+    "Use ONLY column names from the provided column list — never invent a column. " +
+    'Use concrete literal values: ISO dates ("2026-10-22") for dates, plain numbers without commas for numbers. ' +
+    '"in" takes a comma-separated list of values. ' +
+    'If the referenced rule is not in the provided rule list, or cannot be expressed as column filters, set "matched" to false. ' +
+    '"statement" is one sentence restating the rule for the report provenance.';
+
+  const ruleList = rules.length
+    ? rules.map((r) => `- ${r.name}: ${r.content.slice(0, 600)}`).join("\n")
+    : "(none)";
+
+  const user =
+    `User request: ${req.rawMessage}\n\n` +
+    `Workspace rules:\n${ruleList}\n\n` +
+    `Data columns: ${columns.join(", ")}\n\n` +
+    `Return a JSON object with keys: matched, rule_name, statement, predicate.`;
+
+  return await callStructured({
+    databaseId: req.databaseId,
+    schema: RulePredicateSchema,
+    toolName: "emit_rule_predicate",
+    toolDescription: "Emit the resolved rule predicate as structured JSON.",
+    system,
+    userMessage: user,
+    maxTokens: 1500,
+    temperature: 0,
+    callOpts: { userId: req.userId, mode: "chat", phase: "plan-rule" },
+  });
 }
 
 /** Deterministic required-arg check for a single step. */
@@ -454,6 +536,124 @@ function isExplicitAggregation(raw: string): boolean {
   return /\b(sum|total|aggregate|group\s+by|average|avg|count|subtotal|breakdown)\b/i.test(raw);
 }
 
+/** Resolve a referenced workspace rule into a filter predicate + notes, grounded
+ *  on `columns`. Returns a `clarify` PlanResult when the rule can't be resolved
+ *  or expressed — never a silent no-op. */
+async function resolveRule(
+  req: PlanRequest,
+  workspaceRules: { name: string; description?: string; content: string }[],
+  columns: string[],
+  sourceLabel: string,
+): Promise<{ filter?: FilterClause[]; notes?: string[] } | PlanResult> {
+  if (workspaceRules.length === 0) {
+    return {
+      kind: "clarify",
+      missing: [],
+      question:
+        `You referenced a workspace rule, but this workspace has no rules defined. ` +
+        `What's the rule you want applied (e.g. "a row is X if its Date has passed or Category is Y")?`,
+    };
+  }
+  const resolved = await resolveRulePredicate(req, workspaceRules, columns);
+  // A matched rule must yield at least a predicate or a statement; otherwise
+  // it wasn't actually expressed (silently proceeding would drop the rule).
+  const usable =
+    !!resolved &&
+    resolved.matched &&
+    ((resolved.predicate?.length ?? 0) > 0 || !!resolved.statement);
+  if (!usable) {
+    return {
+      kind: "clarify",
+      missing: [],
+      question:
+        `I couldn't match the rule you referenced to a workspace rule I can apply as a data filter. ` +
+        `Could you restate it (e.g. "keep rows whose Date is before today")?`,
+    };
+  }
+  // Validate the predicate against real columns — fail closed on any mismatch.
+  const bad = (resolved.predicate ?? []).filter((c) => !columns.includes(c.column));
+  if (bad.length > 0) {
+    return {
+      kind: "clarify",
+      missing: [],
+      question:
+        `The rule references columns I don't see in ${sourceLabel} (${bad.map((b) => `\`${b.column}\``).join(", ")}). ` +
+        `Available columns: ${columns.join(", ")}. How should I express the rule?`,
+    };
+  }
+  return {
+    filter: resolved.predicate && resolved.predicate.length > 0 ? resolved.predicate : undefined,
+    notes: resolved.statement ? [resolved.statement] : undefined,
+  };
+}
+
+/** A report per source: read → aggregate → save staging → report → download. The
+ *  rule filter/notes are attached only to the source(s) whose columns contain
+ *  every predicate column. */
+async function buildMultiSourcePlan(
+  req: PlanRequest,
+  flags: Flags,
+  sources: string[],
+  inventory: { name: string; columns: string[] }[],
+  rule: { filter?: FilterClause[]; notes?: string[] } | undefined,
+): Promise<PlanResult> {
+  const steps: PlanStep[] = [];
+  for (const source of sources) {
+    const entry = inventory.find((d) => d.name === source);
+    const columns = entry?.columns ?? [];
+
+    const applies = !!rule?.filter && rule.filter.every((c) => columns.includes(c.column));
+    const filter = applies ? rule!.filter : undefined;
+    const notes = applies ? rule!.notes : undefined;
+
+    const args = await llmFillAnalysisArgs(req, source, columns, flags, filter);
+
+    const staging = `staging_${source}_summary`.toLowerCase().replace(/[^a-z0-9_]/g, "_");
+    const filename = `${source}.html`.toLowerCase().replace(/[^a-z0-9_.-]/g, "_");
+
+    steps.push({ tool_id: "get_data", tool_parameters: { name: source }, label: `Read ${source}` });
+
+    const tp: Record<string, unknown> = { name: source };
+    if (args.group_by?.length) tp.group_by = args.group_by;
+    if (args.measures?.length) tp.measures = args.measures;
+    if (filter) tp.filter = filter;
+    steps.push({ tool_id: "aggregate_data", tool_parameters: tp, label: `Summarize ${source}` });
+
+    steps.push({
+      tool_id: "save_data",
+      tool_parameters: { name: staging, value: "{{result}}", type: "json_array" },
+      label: `Save ${source} summary`,
+    });
+
+    const rp: Record<string, unknown> = { summary: staging, details: source };
+    rp.group_by = args.group_by ?? [];
+    if (args.detail_columns?.length) rp.detail_columns = args.detail_columns;
+    if (args.title) rp.title = args.title;
+    if (filter) rp.filter = filter;
+    if (notes) rp.notes = notes;
+    steps.push({ tool_id: "report_table", tool_parameters: rp, label: `Build ${source} report` });
+
+    steps.push({
+      tool_id: "chat_download",
+      tool_parameters: { data: "{{result}}", filename },
+      label: `Download ${source} report`,
+    });
+  }
+
+  // Fail closed: any unresolved required arg → defer to the LLM planner.
+  const missingRequired: string[] = [];
+  for (const s of steps) {
+    for (const m of await stepMissing(s.tool_id, s.tool_parameters)) {
+      missingRequired.push(`${s.tool_id}.${m}`);
+    }
+  }
+  if (missingRequired.length > 0) {
+    return { kind: "fallback", reason: `missing required: ${missingRequired.join(", ")}` };
+  }
+
+  return { kind: "plan", plan: { steps }, missingRequired: [] };
+}
+
 /** Analysis over loaded workspace data → aggregate/judge → report → download. */
 async function analysisPlan(
   req: PlanRequest,
@@ -465,17 +665,78 @@ async function analysisPlan(
     return { kind: "fallback", reason: "bespoke report — defer to build loop", preferLoop: true };
   }
 
+  // A broad "analyze/explore this data" request (no specific aggregation, check,
+  // or report) is open-ended analysis — the LLM build loop explores the tables,
+  // runs per-row rule-compliance checks (judge_data), and composes findings.
+  // Defer there rather than emit a shallow list_data/list_rules inventory plan.
+  if (flags.explore && !flags.aggregate && !flags.report && !flags.judge && !flags.bespoke) {
+    return { kind: "fallback", reason: "broad data exploration — defer to build loop", preferLoop: true };
+  }
+
   const inventory = dataInventory(req.databaseId);
 
   // Follow-ups always reuse the prior turn's source (and saved summary).
   const followUp = referencesPrior(req.rawMessage);
   const last = req.analysisHistory?.[0];
-  const source = followUp && last?.source
-    ? last.source
-    : (ctx.dataFile ?? resolveDataName(req.rawMessage, inventory.map((d) => ({ name: d.name }))));
-  if (!source) return { kind: "fallback", reason: "no data source resolved" };
+
+  // Deterministic name-token match: every loaded file the request names, so
+  // "give me all the X data" matches every file with "X" in its name.
+  // `staging_*` summaries are transient intermediates, not sources.
+  const nameMatches = resolveDataNames(
+    req.rawMessage,
+    inventory.filter((d) => !d.name.startsWith("staging_")).map((d) => ({ name: d.name })),
+  );
+
+  // Resolve the requested data sources: union of the classifier's per-file
+  // matches (fuzzy/paraphrase) and the deterministic name matches (literal),
+  // so a named token is never silently dropped.
+  let sources: string[];
+  if (followUp && last?.source) {
+    sources = [last.source];
+  } else {
+    sources = Array.from(new Set([...ctx.dataFiles, ...nameMatches]));
+  }
+
+  if (sources.length === 0) {
+    // Nothing resolved by name or classifier. If the request still referenced a
+    // data source (per the classifier), surface the mismatch.
+    if (flags.unresolved_source && !followUp) {
+      const names = inventory.map((d) => d.name);
+      return {
+        kind: "clarify",
+        missing: [],
+        question:
+          `I don't see every source you referenced among the loaded data files. ` +
+          `Loaded: ${names.length ? names.map((n) => `\`${n}\``).join(", ") : "(none)"}. ` +
+          `Which file should I analyze — or do you need to upload a file first?`,
+      };
+    }
+    return { kind: "fallback", reason: "no data source resolved" };
+  }
+
+  // Resolve a referenced workspace rule into a deterministic filter predicate.
+  // Grounded on the union of the requested sources' columns so the predicate can
+  // target any of them; applied per-source below.
+  const workspaceRules = loadRules(req.databaseId);
+  let rule: { filter?: FilterClause[]; notes?: string[] } | undefined;
+  if (referencesRule(req.rawMessage, workspaceRules)) {
+    const union = [...new Set(sources.flatMap((s) => inventory.find((d) => d.name === s)?.columns ?? []))];
+    const sourceLabel = sources.length === 1 ? `\`${sources[0]}\`` : "these data files";
+    const r = await resolveRule(req, workspaceRules, union, sourceLabel);
+    if ("kind" in r) return r;
+    rule = r;
+  }
+
+  // Multi-source: run the aggregate → report → download pipeline per source.
+  if (sources.length > 1) {
+    return buildMultiSourcePlan(req, flags, sources, inventory, rule);
+  }
+
+  const source = sources[0];
   const entry = inventory.find((d) => d.name === source);
   const columns = entry?.columns ?? [];
+  const filter = rule?.filter;
+  const ruleNotes = rule?.notes;
 
   const reuseSummary = followUp && last?.savedSummary ? last.savedSummary : null;
 
@@ -486,13 +747,15 @@ async function analysisPlan(
     if (!flags.report) {
       return { kind: "fallback", reason: "follow-up reuse without report not templated" };
     }
-    const args = await llmFillAnalysisArgs(req, source, columns, flags);
+    const args = await llmFillAnalysisArgs(req, source, columns, flags, filter);
     // Reuse the prior aggregation's grouping so the join keys match the summary.
     const gb = last?.groupBy?.length ? last.groupBy : (args.group_by ?? []);
     const rp: Record<string, unknown> = { summary: reuseSummary, details: source };
-    if (gb.length) rp.group_by = gb;
+    rp.group_by = gb;
     if (args.detail_columns?.length) rp.detail_columns = args.detail_columns;
     if (args.title) rp.title = args.title;
+    if (filter) rp.filter = filter;
+    if (ruleNotes) rp.notes = ruleNotes;
     steps.push({ tool_id: "report_table", tool_parameters: rp, label: "Build report" });
     steps.push({
       tool_id: "chat_download",
@@ -506,7 +769,7 @@ async function analysisPlan(
     // request explicitly asks to total/group by something.
     const checkOnly = isCheckRequest(req.rawMessage) && !isExplicitAggregation(req.rawMessage);
     const doAggregate = checkOnly ? false : (flags.aggregate || flags.report);
-    const args = await llmFillAnalysisArgs(req, source, columns, flags);
+    const args = await llmFillAnalysisArgs(req, source, columns, flags, filter);
 
     const staging = `staging_${source}_summary`.toLowerCase().replace(/[^a-z0-9_]/g, "_");
 
@@ -516,6 +779,7 @@ async function analysisPlan(
       const tp: Record<string, unknown> = { name: source };
       if (args.group_by?.length) tp.group_by = args.group_by;
       if (args.measures?.length) tp.measures = args.measures;
+      if (filter) tp.filter = filter;
       steps.push({ tool_id: "aggregate_data", tool_parameters: tp, label: "Summarize" });
 
       // Persist the aggregate summary immediately so {{result}} is the aggregate
@@ -540,9 +804,11 @@ async function analysisPlan(
 
     if (flags.report && doAggregate) {
       const rp: Record<string, unknown> = { summary: staging, details: source };
-      if (args.group_by?.length) rp.group_by = args.group_by;
+      rp.group_by = args.group_by ?? [];
       if (args.detail_columns?.length) rp.detail_columns = args.detail_columns;
       if (args.title) rp.title = args.title;
+      if (filter) rp.filter = filter;
+      if (ruleNotes) rp.notes = ruleNotes;
       steps.push({ tool_id: "report_table", tool_parameters: rp, label: "Build report" });
       steps.push({
         tool_id: "chat_download",
@@ -632,9 +898,13 @@ const SHAPES: ShapeDef[] = [
         "Does this request ask for a report, dashboard, or downloadable file as the outcome?",
       bespoke:
         "Does this request ask for a custom/bespoke dashboard, chart, or visualization layout that a fixed drill-down table template cannot express?",
+      explore:
+        "Does this request ask to broadly analyze, explore, or understand the loaded data to surface findings, patterns, or issues (e.g. 'analyze the data', 'review this data', 'what's going on here') — rather than a specific aggregation, a specific yes/no check, or a specific report?",
       persist: "Should the result be saved to the workspace as durable data?",
+      unresolved_source:
+        "Does this request reference a data file, report, or document by name that is NOT present in the provided list of loaded data files?",
     },
-    matches: (f) => f.aggregate || f.report || f.judge || f.bespoke,
+    matches: (f) => f.aggregate || f.report || f.judge || f.bespoke || f.explore,
     build: (req, flags, ctx) => analysisPlan(req, flags, ctx),
   },
 ];
@@ -649,11 +919,11 @@ export function registerShape(shape: ShapeDef): void {
 }
 
 /** Stage 1 — one Jev fan-out classifies every shape's nouls and (when data is
- *  loaded) picks the data file to read. The question set is derived from the
- *  registry so adding a shape needs no change here. */
+ *  loaded) which data files the request references. The question set is derived
+ *  from the registry so adding a shape needs no change here. */
 async function classify(
   req: PlanRequest,
-): Promise<{ flags: Flags; dataFile: string | null }> {
+): Promise<{ flags: Flags; dataFiles: string[] }> {
   const key = await getClassifierKey(req.userId);
 
   let privacyMap = loadPrivacyMap(req.databaseId);
@@ -668,6 +938,7 @@ async function classify(
     data_files: inventory.map((d) =>
       d.columns.length ? `${d.name} (${d.columns.join(", ")})` : d.name,
     ),
+    workspace_rules: ruleBriefLines(req.databaseId),
   };
 
   const questions: Record<string, Question> = {};
@@ -677,20 +948,19 @@ async function classify(
     }
   }
 
-  if (inventory.length > 0) {
-    const dataCriteria: Record<string, string> = {};
-    for (const d of inventory) {
-      dataCriteria[d.name] = d.columns.length ? `columns: ${d.columns.join(", ")}` : "(no columns)";
-    }
-    dataCriteria[DATA_NONE_SENTINEL] = "This request does not read a loaded data file.";
-    questions.data_file = {
-      type: "choice",
-      instructions:
-        `Which loaded data file should this request read? Pick the file that matches; ` +
-        `if none, choose "${DATA_NONE_SENTINEL}".`,
-      criteria: dataCriteria,
+  // One noul per loaded data file — independent yes/no so a request that
+  // references several files is detected, not narrowed to a single pick.
+  // `staging_*` summaries are transient intermediates, not analysis targets.
+  const dataFileById: Record<string, string> = {};
+  inventory.forEach((d, i) => {
+    if (d.name.startsWith("staging_")) return;
+    const id = `data_file_${i}`;
+    dataFileById[id] = d.name;
+    questions[id] = {
+      type: "noul",
+      instructions: `Does this request ask to read or analyze the data file named "${d.name}"?`,
     };
-  }
+  });
 
   const { response } = await askClassifier(state, questions, { apiKey: key });
   const noul = (name: string) => (response.answers[name] as NoulAnswer).noul >= N;
@@ -700,23 +970,19 @@ async function classify(
     for (const id of Object.keys(shape.nouls)) flags[id] = noul(id);
   }
 
-  let dataFile: string | null = null;
-  const dataAnswer = response.answers.data_file as ChoiceAnswer | undefined;
-  if (dataAnswer && inventory.length > 0) {
-    const top = Object.entries(dataAnswer.probabilities ?? {})
-      .sort((a, b) => b[1] - a[1])
-      .map(([name, prob]) => ({ name, prob }))[0];
-    if (top && top.name !== DATA_NONE_SENTINEL && top.prob >= 0.2) dataFile = top.name;
+  const dataFiles: string[] = [];
+  for (const [id, name] of Object.entries(dataFileById)) {
+    if (noul(id)) dataFiles.push(name);
   }
 
-  return { flags, dataFile };
+  return { flags, dataFiles };
 }
 
 export const cascadePlanner: Planner = {
   id: "cascade",
   async plan(req: PlanRequest): Promise<PlanResult> {
-    const { flags, dataFile } = await classify(req);
-    const ctx: ShapeContext = { dataFile };
+    const { flags, dataFiles } = await classify(req);
+    const ctx: ShapeContext = { dataFiles };
 
     // Deterministic QBO statement gate — a balance-sheet / P&L request must
     // resolve to report_qbo_bs/pnl (or ask for its date), never fall through to

@@ -43,6 +43,17 @@ export const Tool_run = async (api: WFP_API): Promise<Result> => {
 
     const result = await aggregator.callTool(toolName, args);
 
+    // Surface MCP tool failures — the MCP SDK sets `isError` on the result when
+    // the tool's handler returned an error. Without this, a failing tool would
+    // masquerade as "✓ completed" and downstream steps would run on bad data.
+    if ((result as any)?.isError) {
+        const contentArray = (result as any).content as any[];
+        const errText = Array.isArray(contentArray)
+            ? contentArray.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('\n')
+            : String((result as any).error ?? '');
+        return { status: 'error', statusMessage: errText || `${toolName} failed` };
+    }
+
     const contentArray = (result as any).content as any[];
     const textContent = contentArray
         .filter((c: any) => c.type === 'text')

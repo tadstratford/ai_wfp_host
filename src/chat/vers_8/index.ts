@@ -121,12 +121,16 @@ export async function handleMessage(
       workflowId: session.activeWorkflowId as string | undefined,
       mode,
       addMessage: async (msg: AddMessageArgs) => {
-        // Refresh metadata from the store before each save so a partial message
-        // write never clobbers metadata set by updateSession (write-approval,
-        // pendingResume, lastActiveSkills) with a stale copy from handleMessage's
-        // initial getSession.
+        // Re-fetch the FULL session before each save. The plan executor
+        // (executePlanInSession) writes step-status / tool / report messages to
+        // its own copy of the session and saves it directly; re-fetching here
+        // ensures we append to those latest messages instead of overwriting them
+        // with this handler's stale copy. (Previously only `metadata` was
+        // refreshed, so every message added after a plan ran — the rules audit,
+        // the completion summary — silently clobbered the tool output and the
+        // report download buttons, which is why nothing appeared after Approve.)
         const latest = await getSession(databaseId, sessionId);
-        if (latest) session!.metadata = latest.metadata;
+        if (latest) session = latest;
         session = await addMessage({
           session: session!,
           databaseId,

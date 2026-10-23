@@ -2,6 +2,7 @@ import { z } from "zod";
 import { defineTool } from "../../tool";
 import { requireWs, toRows, maskRow, buildMasker } from "../scope";
 import { buildDrilldownReportHtml } from "@capabilities/data/drilldown";
+import { FilterSchema, applyRowFilter } from "@data/filter";
 
 export default defineTool({
   name: "report_table",
@@ -16,8 +17,10 @@ export default defineTool({
     group_by: z.array(z.string()).describe("Columns (present in both tables) that link each detail row to its summary group."),
     detail_columns: z.array(z.string()).optional().describe("Detail columns to show in the expanded rows. Defaults to the details table's columns."),
     title: z.string().optional().describe("Report title (default 'Report')."),
+    filter: FilterSchema.optional().describe("Optional row filter applied to the detail rows before joining."),
+    notes: z.array(z.string()).optional().describe("Optional provenance notes (e.g. a workspace rule that was applied), shown in the report header."),
   },
-  handler: async ({ summary, details, group_by, detail_columns, title }) => {
+  handler: async ({ summary, details, group_by, detail_columns, title, filter, notes }) => {
     const ws = requireWs();
     const summaryEntry = ws.getDataEntry(summary);
     if (!summaryEntry) {
@@ -39,7 +42,9 @@ export default defineTool({
 
     const masker = buildMasker();
     const sRows = summaryRows.map((r) => maskRow(r, masker));
-    const dRows = detailRows.map((r) => maskRow(r, masker));
+    const dRows = applyRowFilter(detailRows, filter && filter.length > 0 ? filter : undefined).map((r) =>
+      maskRow(r, masker),
+    );
 
     const workspace = ws.getMetadata()?.workspace ?? "Workspace";
     const detailCols =
@@ -55,6 +60,7 @@ export default defineTool({
       groupBy: group_by,
       detailColumns: detailCols,
       sources: [summary, details],
+      notes: notes && notes.length > 0 ? notes : undefined,
     });
 
     return { content: [{ type: "text" as const, text: html }] };

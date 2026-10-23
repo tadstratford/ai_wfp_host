@@ -1,8 +1,12 @@
 # Chat
 
-> Last updated: 2026-10-13
+> Last updated: 2026-10-23
 
-AI chat orchestration layer — receives user messages, runs deterministic gates, routes through Jev (Classifier), then executes a deterministic fast path, a composed node-plan, or an LLM tool-calling loop.
+AI chat orchestration layer — receives user messages, runs deterministic gates, routes through Jev (Classifier), then produces a plan (a deterministic one-step "trivial plan", a Jev-composed node-plan, or an LLM-composed plan) and executes it inline; novel/bespoke work falls through to an LLM tool-calling loop.
+
+Two orchestrator versions are selectable via `process.env.ORCHESTRATOR` (default `vers_8`):
+- **vers_8** — Jev + deterministic regex classify intent and compose a template plan; the LLM fills args and only falls back to a build loop for novel work. Determinism/cost-first.
+- **vers_9** — the LLM plans and executes through the build loop, then **Jev verifies the result** (`satisfies`/`complete`/`accurate` in `vers_9/verify.ts`). Completeness/accuracy-first. See `vers_9/`.
 
 ## Files
 
@@ -27,11 +31,14 @@ AI chat orchestration layer — receives user messages, runs deterministic gates
 | `plan/args.ts` | Deterministic structured-arg synthesis (`matchColumnNames`, `synthesizeStructuredArgs`, `resolveDataName`) — fills `aggregate_data`'s `measures`/`group_by` from "sum X by Y" phrasing. |
 | `plan/outputs.ts` | Thin wrapper over the MCP result-contract registry (`src/mcp/outputs.ts` → `resultContract`); `getToolOutput`, `saveTypeFor`. |
 | `vers_8/index.ts` | Per-request handler: dedup, cancel, `setLogHook` wiring, `OrchestratorIO` construction, session status, SSE. |
-| `vers_8/orchestrator.ts` | Request flow: deterministic gates → Jev routing → fast path → plan path (planner chain `cascade → llm → build loop`; show `Steps` → write gate → execute) → build loop; also `fillFastPathArgs`, `renderPlanSummary`, `auditChatPlan`, `runPlan`, `recordAnalysis`. |
+| `vers_8/orchestrator.ts` | Request flow: deterministic gates → Jev routing → plan path (trivial one-step lane → `cascade` shape planner → `llm` planner → build loop; show `Steps` → write gate → execute) → build loop; also `resolveTrivialPlan`, `renderPlanSummary`, `auditChatPlan`, `runPlan`, `recordAnalysis`. |
 | `vers_8/skillRouter.ts` | Jev (TypeSafe "Classifier") front-door router — one batched structured-decision call classifies the request (skills + nouls only; tools are derived from skills). |
 | `vers_8/getSkillsPrompt.ts` | Loads system skill names/descriptions for routing (helper). |
 | `vers_8/loop.ts` | Explicit while-loop (`runLoop()`): reason → act → feed back. `mcpToolsToProvider()`. |
 | `vers_8/prompts.ts` | Dynamic system prompt builder (build + email modes): tool catalog, skills, rules, data inventory, WFP type vocab. |
+| `vers_9/index.ts` | v9 handler — mirrors `vers_8/index.ts` (banner "v9", same log hook + SSE wiring). |
+| `vers_9/orchestrator.ts` | v9 flow: Jev routing → LLM build loop (plans + executes) → `verifyResult` → persist. No regex/noul intent detection. |
+| `vers_9/verify.ts` | Jev result verification — `satisfies`/`complete`/`accurate` nouls gate the LLM's output, cross-checked against the deterministic tools' computed output (`evidence`); fail-closed, privacy-masked. |
 
 Supporting modules:
 
@@ -67,44 +74,43 @@ vers_8 shifts the pipeline from "LLM plans everything" (v6) to "the Classifier r
                               │  → decision {needsTool, mutating, complexity, followUp, selectedSkills}
                               │  → tools derived deterministically from skills' "## Tools needed"
                               ▼
-       4. Jev follow_up ≥ 0.6?  ──yes──► re-run last tool (carry-forward)
-                              │
-                              ▼
-              ┌───────────────────────────┐
-              │  DETERMINISTIC FAST PATH   │   Phase 0 (Classifier)
-              │  needsTool≥.5 && low comp  │
-              │  && a declared read-only   │
-              │  tool's params all resolve │
-              └───────────────┬───────────┘
-                     yes      │      no
-              ┌───────────────▼──────────┐
-              │  run tool DIRECTLY        │──► small LLM "render" call → reply
-              └──────────────────────────┘
-                                          │
-                               ┌───────────▼──────────┐
-                               │  HARD WRITE GATE      │
-                               │  mutating? → ask user │──► stop, await approval
-                               └───────────┬──────────┘
-                                           │ approved / not mutating
-                                           ▼
-               ┌───────────────────────────────────────┐
-               │  NODE-PLAN PATH (plan → execute)      │
-               │  cascade shape registry → [llm planner │
-               │  fallback] → run steps inline          │
-               └───────────────────┬───────────────────┘
-                          planned │   fallback (or preferLoop)
-                                   ▼
-               ┌───────────────────────────────────────┐
-               │  LLM BUILD LOOP (final fallback)      │
-               │  explicit while-loop: reason → act    │
-               └───────────────────────────────────────┘
+        4. Jev follow_up ≥ 0.6?  ──yes──► re-run last tool (carry-forward)
+                               │
+                               ▼
+                ┌───────────────────────────────────────┐
+                │  PLAN PATH (single methodology)        │
+                │  1. trivial one-step lane — read-only, │
+                │     confident, params resolve (no Jev/ │
+                │     LLM)                               │
+                │  2. cascade shape registry (Jev fan-   │
+                │     out + deterministic template)      │
+                │  3. llm planner fallback (full LLM)    │
+                └───────────────────┬───────────────────┘
+                                    │ plan composed
+                                    ▼
+                ┌───────────────────────────────────────┐
+                │  SHOW STEPS → HARD WRITE GATE          │
+                │  plan has a write tool? → ask user     │──► stop, await approval
+                └───────────────────┬───────────────────┘
+                                    │ approved / read-only
+                                    ▼
+                ┌───────────────────────────────────────┐
+                │  EXECUTE inline (executePlanInSession) │
+                │  stream step-status → live checklist   │
+                └───────────────────┬───────────────────┘
+                           fallback │ (preferLoop / no plan)
+                                    ▼
+                ┌───────────────────────────────────────┐
+                │  LLM BUILD LOOP (final fallback)      │
+                │  explicit while-loop: reason → act    │
+                └───────────────────────────────────────┘
 ```
 
-The plan path calls `getPlanner().plan(...)` → shows the `Steps` list → gates approval → `executePlanInSession`. A plan the active strategy can't produce or validate returns `{ kind: "fallback" }`; the orchestrator then retries with `llmPlanner` (unless `preferLoop` is set, which routes straight to the build loop), and only if that also falls back does the LLM loop run — so the plan path can never regress a request it can't handle.
+The plan path is the **single methodology**: the orchestrator first tries a **trivial one-step plan** (`resolveTrivialPlan`) for a confident, read-only, single-tool request — the deterministic arg resolver produces a one-step plan with no Jev classify and no LLM. Otherwise it calls `getPlanner().plan(...)` (the `cascade` shape planner, or another strategy selected by `CHAT_PLANNER`), then shows the `Steps` list, gates approval, and runs `executePlanInSession`. A plan the active strategy can't produce or validate returns `{ kind: "fallback" }`; the orchestrator then retries with `llmPlanner` (unless `preferLoop` is set, which routes straight to the build loop), and only if that also falls back does the LLM loop run — so the plan path can never regress a request it can't handle.
 
 ### Skills-first routing & tool contracts
 
-Routing is **skills-only**: Jev receives the skill catalog plus a few lightweight `noul`s (`needs_tool`, `mutating`, `complexity`, `follow_up`) — no tool list, no workflow list, so the routing prompt stays small. Tools are derived deterministically afterward from the selected skills' `## Tools needed` sections (plus the always-available set in `orchestrator.ts`).
+Routing is **skills-first**: Jev receives the skill catalog plus a few lightweight `noul`s (`needs_tool`, `mutating`, `complexity`, `follow_up`), along with the workspace's rule briefs and loaded data-file names — no tool list, no workflow list, so the routing prompt stays small but rule-aware (a rule can steer skill selection). Tools are derived deterministically afterward from the selected skills' `## Tools needed` sections (plus the always-available set in `orchestrator.ts`).
 
 Two MCP-layer modules back the tool model:
 
@@ -123,7 +129,7 @@ The plan path is **pluggable**: the orchestrator calls `getPlanner().plan(reques
 
 `registerShape()` is the extension point for future non-internal (external MCP) tool shapes.
 
-**Bespoke reports** (custom dashboards/charts) can't be expressed by a fixed template, so `cascade` returns `{ kind: "fallback", preferLoop: true }` — the orchestrator skips `llmPlanner` and runs the build loop directly (which authors bespoke HTML per `report-authoring.md`).
+**Bespoke reports** (custom dashboards/charts) can't be expressed by a fixed template, so `cascade` returns `{ kind: "fallback", preferLoop: true }` — the orchestrator skips `llmPlanner` and runs the build loop directly (which authors bespoke HTML per `report-authoring.md`). **Broad exploration** ("analyze this data", "review this data") does the same: when the `analysis` shape's `explore` noul fires without a specific `aggregate`/`judge`/`report`, it defers to the build loop — the loop explores the tables, runs per-row `judge_data` rule-compliance checks, and composes findings — instead of emitting a shallow `list_data`/`list_rules` inventory plan.
 
 The other strategies are `jev-step` (the original `composePlan` → `validatePlan` step-by-step classifier) and `llm` (`llmPlanner`, the one-shot full-LLM plan used as the universal fallback).
 
@@ -171,10 +177,10 @@ Two guardrails end the loop: **(1)** the model stops calling tools (natural end)
 | Step | Engine | Where |
 |---|---|---|
 | Continuation / follow-up / write-approval gates | Deterministic heuristics (regex, `Set`s) | `orchestrator.ts` |
-| Jev routing (skill + tool + mutating + complexity) | **Classifier** (TypeSafe `jev-latest`) | `skillRouter.ts` `route()` |
+| Jev routing (skill + tool + mutating + complexity) | **Classifier** (TypeSafe `jev-latest`) | `skillRouter.ts` `route()` — sees skills + rule briefs + data-file names |
 | Parameter extraction (dates, numbers, enums) | Deterministic | `chat/extract/extract.ts`, `dates.ts` |
-| Fast path (read-only, confident, fully-resolved) | Deterministic + 1 tiny LLM render | `executeFastPath()` + `fillFastPathArgs()` |
-| Write gate | Deterministic (`looksMutating` + `WRITE_TOOLS` + Jev `mutating`) | `orchestrator.ts` |
+| Trivial one-step plan (read-only, confident, fully-resolved) | Deterministic (no Jev/LLM) | `resolveTrivialPlan()` + `fillFastPathArgs()` |
+| Write gate | Deterministic (`looksMutating` + Jev `mutating` + the plan's own `WRITE_TOOLS` steps) | `orchestrator.ts` |
 | Plan compose (shape → template → args) | **Classifier** (shape fan-out from the registry) + deterministic template + 1 LLM arg-fill; `preferLoop` → build loop | `plan/cascade.ts` (default) → `plan/llm.ts` fallback |
 | Plan validate (satisfies + safe) | **Classifier** + deterministic missing-arg check | `plan/validate.ts` |
 | Plan execute (inline, streamed) | Workflow executor | `executePlanInSession()` in `src/workflow/executor.ts` |
@@ -182,7 +188,7 @@ Two guardrails end the loop: **(1)** the model stops calling tools (natural end)
 | Fail-closed rule audit | **Classifier** (`runStreamRuleAudit`) | `auditChatPlan()` |
 | Build loop (final fallback; also the target of `preferLoop` for bespoke reports/dashboards) | **LLM** (tool-calling loop) | `loop.ts` `runLoop()` |
 
-**In one sentence:** deterministic code and Jev (Classifier) decide *whether* the LLM is needed and *gate* it; confident read-only requests take the fast path, structured multi-step requests run as a composed node-plan, and only the remaining novel work falls through to the LLM loop — whose tools are pre-filtered by the skills Jev selected.
+**In one sentence:** deterministic code and Jev (Classifier) decide *whether* the LLM is needed and *gate* it; every request runs as a plan — a deterministic one-step plan for confident reads, a Jev-composed node-plan for structured multi-step work — and only the remaining novel/bespoke work falls through to the LLM loop, whose tools are pre-filtered by the skills Jev selected.
 
 ## Log Hook Pattern
 

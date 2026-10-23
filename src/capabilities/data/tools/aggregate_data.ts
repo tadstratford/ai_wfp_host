@@ -2,6 +2,7 @@ import { z } from "zod";
 import { defineTool } from "../../tool";
 import { requireWs, toRows, stagedFromEntry, buildMasker } from "../scope";
 import { aggregateLarge, aggregateCells, type AggregateMeasure } from "@data/stats";
+import { FilterSchema, applyRowFilter, type FilterClause } from "@data/filter";
 
 export default defineTool({
   name: "aggregate_data",
@@ -16,9 +17,10 @@ export default defineTool({
       column: z.string().describe("Numeric column to aggregate."),
       fn: z.enum(["sum", "count", "avg", "min", "max"]).describe("Aggregation function."),
     })).min(1).describe("Aggregations to compute (e.g. sum of Debit grouped by Account)."),
+    filter: FilterSchema.optional().describe("Optional row filter applied before grouping (e.g. keep rows where a column equals a value)."),
     limit: z.number().int().min(1).max(500).optional().describe("Max groups to return. Default 50."),
   },
-  handler: async ({ name, group_by, measures, limit }) => {
+  handler: async ({ name, group_by, measures, filter, limit }) => {
     const ws = requireWs();
     const entry = ws.getDataEntry(name);
     if (!entry) {
@@ -27,19 +29,21 @@ export default defineTool({
 
     const gb = group_by ?? [];
     const ms: AggregateMeasure[] = measures.map((m) => ({ column: m.column, fn: m.fn }));
+    const filterClauses: FilterClause[] | undefined = filter && filter.length > 0 ? filter : undefined;
     const masker = buildMasker();
     const lim = limit ?? 50;
 
     let res: { groups: { key: Record<string, string> | null; measures: Record<string, number | null>; count: number }[]; totalGroups: number };
     if (entry.large && typeof entry.content === "string") {
-      res = aggregateLarge(entry.content, stagedFromEntry(entry), gb, ms, lim);
+      res = aggregateLarge(entry.content, stagedFromEntry(entry), gb, ms, lim, filterClauses);
     } else {
       const rows = toRows(entry);
       if (rows === null) {
         return { content: [{ type: "text" as const, text: `Data "${name}" is not tabular.` }], isError: true };
       }
-      const colNames = entry.columns ?? (rows.length ? Object.keys(rows[0]) : []);
-      const cellRows = rows.map((r) => colNames.map((c) => String((r as Record<string, unknown>)[c] ?? "")));
+      const filteredRows = applyRowFilter(rows, filterClauses);
+      const colNames = entry.columns ?? (filteredRows.length ? Object.keys(filteredRows[0]) : []);
+      const cellRows = filteredRows.map((r) => colNames.map((c) => String((r as Record<string, unknown>)[c] ?? "")));
       res = aggregateCells(colNames, cellRows, gb, ms, lim);
     }
 

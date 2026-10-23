@@ -94,10 +94,53 @@ export const messagesHandler = async (c: Context) => {
   const allMsgs = session.messages.filter((m: any) => !m?.json?.postMortem);
   const contentMsgs = allMsgs.filter((m: any) => {
     if (isNoise(m)) return false;
+    const k = classifyKind(m);
+    // step-status / step markers fold into the live plan checklist below.
+    if (k === "step-status" || k === "step") return false;
     if (transient && (m.role === "system" || m.source === "workflow_start" || m.source === "workflow_end")) return false;
     return true;
   });
   const noiseMsgs = allMsgs.filter(isNoise);
+
+  // Live plan checklist — the latest `plan` message plus the step-statuses
+  // emitted after it (each index overwrites with the most recent status).
+  const planMeta = (() => {
+    let planIdx = -1;
+    for (let i = allMsgs.length - 1; i >= 0; i--) {
+      if (allMsgs[i].json?.kind === "plan") { planIdx = i; break; }
+    }
+    if (planIdx < 0) return null;
+    const statusByIndex: Record<number, string> = {};
+    for (let i = planIdx + 1; i < allMsgs.length; i++) {
+      const j = allMsgs[i].json as any;
+      if (j?.kind === "step-status" && Number.isInteger(j.index)) {
+        statusByIndex[j.index] = j.status;
+      }
+    }
+    return { plan: allMsgs[planIdx], statusByIndex };
+  })();
+
+  const planChecklist = (steps: any[], statusByIndex: Record<number, string>) => {
+    const iconFor = (status?: string) => {
+      if (status === "done") return <span class="text-leaf-500">✓</span>;
+      if (status === "running") return <span class="text-brand-500">▶</span>;
+      if (status === "error") return <span class="text-coral-400">✗</span>;
+      return <span class="text-ink-300 dark:text-ink-600">○</span>;
+    };
+    return (
+      <div class="px-1 py-1">
+        <div class="text-xs font-semibold uppercase tracking-wide text-ink-400 dark:text-ink-500 mb-2">Plan</div>
+        <ol class="space-y-1">
+          {steps.map((s: any, i: number) => (
+            <li class="flex items-start gap-2 text-sm text-ink-600 dark:text-white/80">
+              <span class="w-4 text-center font-semibold shrink-0">{iconFor(statusByIndex[i])}</span>
+              <span class={statusByIndex[i] === "error" ? "text-coral-600 dark:text-coral-400 font-medium" : ""}>{s.label}</span>
+            </li>
+          ))}
+        </ol>
+      </div>
+    );
+  };
 
   const stripMd = (s: string): string =>
     (s || "")
@@ -151,7 +194,11 @@ export const messagesHandler = async (c: Context) => {
           ? "ds-card rounded-r-lg border-l-4 border-brand-500 bg-brand-50/40 dark:bg-brand-950/30 px-3 py-2"
           : `ds-card rounded-lg border px-3 py-2 ${isError ? "border-coral-200 dark:border-coral-800" : "border-ink/[0.08] dark:border-white/[0.08]"} ${isAuditFailed ? "!border-coral-500 !ring-1 !ring-coral-200" : ""}`;
 
-        if (kind === "plan" || kind === "step") {
+        if (kind === "plan") {
+          const steps = Array.isArray(message.json?.steps) ? message.json.steps : null;
+          if (planMeta && message.id === planMeta.plan.id && steps) {
+            return planChecklist(steps, planMeta.statusByIndex);
+          }
           return (
             <div class="px-1 py-1 text-sm text-ink-600 dark:text-white/80">
               <div
