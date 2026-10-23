@@ -198,7 +198,64 @@ interface EvidenceItem {
 /** Tools whose output is structured, deterministic ground truth (computed
  *  figures / Jev verdicts) — collected as `evidence` so Jev can cross-check the
  *  LLM's prose against what was actually computed. */
-const VERIFIABLE_TOOLS = new Set(["aggregate_data", "check_data", "judge_data", "compare_data"]);
+const VERIFIABLE_TOOLS = new Set(["aggregate_data", "check_data", "judge_data", "compare_data", "reconcile_relationship"]);
+
+/** How many same-signature aggregate_data calls before we warn about fan-out. */
+const FANOUT_THRESHOLD = 5;
+
+/** Signature identifying "the same aggregate question, re-run per entity": two
+ *  aggregate_data calls share a signature when their group_by and filter columns
+ *  match — only the filter *value* changes, i.e. per-entity fan-out. */
+function fanoutSignature(args: Record<string, unknown>): string {
+  const gb = JSON.stringify(args.group_by ?? null);
+  const f = args.filter;
+  const cols = Array.isArray(f)
+    ? f.map((x: any) => (x && typeof x === "object" ? String(x.column ?? "") : "")).join("|")
+    : "";
+  return `${gb}::${cols}`;
+}
+
+// ── Prior-turn evidence persistence (follow-up grounding) ───────────────────
+// Tool results are NOT part of the persisted chat history, so on a follow-up
+// turn the model only sees its own prose — not the numbers behind it (which is
+// why it can "forget" what it computed and fabricate). We persist a compact,
+// already-privacy-masked slice of the deterministic-tool evidence and re-inject
+// it on the next turn so follow-ups stay grounded.
+
+const MAX_EVIDENCE_ITEMS = 10;
+const MAX_EVIDENCE_ITEM_CHARS = 1500;
+
+function compactEvidence(evidence: EvidenceItem[]): EvidenceItem[] {
+  return evidence.slice(-MAX_EVIDENCE_ITEMS).map((e) => ({
+    tool: e.tool,
+    summary: e.summary.length > MAX_EVIDENCE_ITEM_CHARS ? e.summary.slice(0, MAX_EVIDENCE_ITEM_CHARS) : e.summary,
+  }));
+}
+
+async function persistEvidence(databaseId: string, sessionId: string, evidence: EvidenceItem[]): Promise<void> {
+  if (evidence.length === 0) return; // keep the prior turn's evidence until newer evidence replaces it
+  try {
+    const fresh = await getSession(databaseId, sessionId);
+    if (!fresh) return;
+    await updateSession(databaseId, sessionId, "metadata", {
+      ...(fresh.metadata ?? {}),
+      lastEvidence: compactEvidence(evidence),
+    });
+  } catch (err: any) {
+    console.error("[vers_9] persistEvidence failed:", err.message);
+  }
+}
+
+function buildPriorEvidenceSection(evidence: EvidenceItem[]): string {
+  const lines = evidence.map((e) => `[${e.tool}] ${e.summary}`);
+  return (
+    `\n\n## Prior analysis evidence (your previous turn)\n` +
+    `These are the deterministic tool results you computed in the previous turn. ` +
+    `Ground any follow-up answer in these figures — do not re-derive or invent numbers. ` +
+    `If the user's question is not answerable from this evidence, run the tools again rather than guessing.\n` +
+    lines.join("\n")
+  );
+}
 
 /** Run the LLM build loop with auto-continue, writing each tool's output into
  *  session.parameters['result'] so `{{result}}` resolves identically to a
@@ -216,6 +273,8 @@ async function executeLoop(opts: {
   let totalIterations = 0;
   let last: LoopResult;
   const evidence: EvidenceItem[] = [];
+  let fanoutSig = "";
+  let fanoutCount = 0;
 
   while (true) {
     last = await runLoop({
@@ -236,6 +295,22 @@ async function executeLoop(opts: {
         console.log(`[vers_9] Tool: ${name}(${JSON.stringify(args).slice(0, 200)})`);
         try {
           const resolvedArgs = resolveTemplates(args, opts.session.parameters, opts.io.databaseId) as Record<string, unknown>;
+          // Detect per-entity fan-out: the same aggregate question re-run with
+          // only the filter value changing (e.g. "Write off - Creare", "… - Lake
+          // Shore", …). Warn instead of letting the loop burn every iteration.
+          let fanoutWarning = "";
+          if (name === "aggregate_data") {
+            const sig = fanoutSignature(resolvedArgs);
+            if (sig && sig === fanoutSig) fanoutCount++;
+            else { fanoutSig = sig; fanoutCount = 1; }
+            if (fanoutCount >= FANOUT_THRESHOLD) {
+              fanoutCount = 0;
+              fanoutWarning =
+                "\n\n⚠ STOP — you are repeating aggregate_data once per entity (fan-out). " +
+                "Instead make ONE aggregate_data call with group_by on the entity column, " +
+                "or a single compare_data between the two aggregated tables, then deliver the final answer.";
+            }
+          }
           const mcpResult = await aggregator.callTool(name, resolvedArgs);
           const full = extractTextContent(mcpResult);
           if (VERIFIABLE_TOOLS.has(name)) {
@@ -251,7 +326,8 @@ async function executeLoop(opts: {
             _meta: { type: "text" },
             data: resultValue,
           });
-          return truncateToolResult(full);
+          const out = truncateToolResult(full);
+          return fanoutWarning ? out + fanoutWarning : out;
         } catch (err: any) {
           console.error(`[vers_9] Tool ${name} error:`, err.message);
           return `Error: ${err.message}`;
@@ -318,16 +394,29 @@ export async function processUserMessage(
   // gaps injected so the model addresses them instead of starting fresh (which
   // just re-hallucinated the same result).
   if (meta.pendingVerify && isContinuation(rawMessage)) {
-    const pending = meta.pendingVerify as { rawMessage: string; reason: string };
+    const pending = meta.pendingVerify as {
+      rawMessage: string;
+      reason: string;
+      satisfies?: number;
+      complete?: number;
+      accurate?: number;
+      thorough?: number;
+    };
     await updateSession(io.databaseId, io.sessionId, "metadata", {
       ...meta,
       pendingVerify: undefined,
     });
     const fresh = (await getSession(io.databaseId, io.sessionId)) ?? session;
-    const combined =
-      `${pending.rawMessage}\n\n` +
+    let nudge =
       `Jev reviewed your previous result and flagged these gaps: ${pending.reason}. ` +
       `Address each gap and re-deliver a corrected, complete result.`;
+    if (typeof pending.accurate === "number" && pending.accurate < 0.6) {
+      nudge +=
+        ` Your previous answer's figures were NOT grounded in the tool results ` +
+        `(accuracy ${pending.accurate.toFixed(2)}). Re-run the tools and report ONLY ` +
+        `numbers you read directly from the tool results — never reconstruct a figure from memory.`;
+    }
+    const combined = `${pending.rawMessage}\n\n${nudge}`;
     await processUserMessage(combined, fresh, io);
     return;
   }
@@ -401,7 +490,13 @@ export async function processUserMessage(
   }
 
   const toolSchemas = mcpToolsToProvider(workingTools);
-  const systemPrompt = buildSystemPrompt(io.mode, toolSchemas, io.databaseId, selectedSkills);
+  let systemPrompt = buildSystemPrompt(io.mode, toolSchemas, io.databaseId, selectedSkills);
+  // Re-inject the previous turn's computed evidence so follow-ups stay grounded
+  // (tool results are not otherwise part of the persisted history).
+  const priorEvidence = meta.lastEvidence as EvidenceItem[] | undefined;
+  if (Array.isArray(priorEvidence) && priorEvidence.length > 0) {
+    systemPrompt += buildPriorEvidenceSection(priorEvidence);
+  }
 
   // Recent history → provider messages.
   const sessionMessages: any[] = session.messages || [];
@@ -424,6 +519,9 @@ export async function processUserMessage(
 
   // ── LLM build loop: plan + execute ──────────────────────────────────────
   const { result, evidence } = await executeLoop({ system: systemPrompt, messages, toolSchemas, io, session });
+
+  // Persist this turn's computed evidence for follow-up grounding.
+  await persistEvidence(io.databaseId, io.sessionId, evidence);
 
   const toolsUsed = result.toolCalls.map((tc) => tc.tool);
   const reply = result.reply ?? "";
@@ -472,7 +570,14 @@ export async function processUserMessage(
       if (fresh) {
         await updateSession(io.databaseId, io.sessionId, "metadata", {
           ...(fresh.metadata ?? {}),
-          pendingVerify: { rawMessage, reason: verdict.reason ?? "incomplete or inaccurate" },
+          pendingVerify: {
+            rawMessage,
+            reason: verdict.reason ?? "incomplete or inaccurate",
+            satisfies: verdict.satisfies,
+            complete: verdict.complete,
+            accurate: verdict.accurate,
+            thorough: verdict.thorough,
+          },
         });
       }
     } catch (err: any) {

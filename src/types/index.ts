@@ -11,6 +11,14 @@ export { BUILTIN_TOOL_IDS } from "./workflow";
 export type { Tool, ToolInput, ToolOutput, ToolInputType, ToolOutputType } from "./tool";
 export type { DataEntry, ContentType } from "./data";
 export type {
+  DataCatalog,
+  CatalogTable,
+  CatalogRelationship,
+  CatalogAlias,
+  RelationshipKind,
+  RelationshipSource,
+} from "./dataCatalog";
+export type {
   Per,
   Kind,
   FactRow,

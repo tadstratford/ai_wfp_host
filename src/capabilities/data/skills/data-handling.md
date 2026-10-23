@@ -17,6 +17,8 @@ description: Work with workspace data files — list, read, transform, and store
 - `resolve_data_shape` — resolve a raw sheet (json_cells) into a clean flat table
 - `check_data` — ask a few yes/no checks over the whole dataset with the typed Classifier
 - `compare_data` — reconcile two tabular files (join on shared keys, report matched/mismatched/missing rows)
+- `list_relationships` — list the discovered cross-table links (equals/contains) in the data catalog
+- `reconcile_relationship` — reconcile two tables on a discovered link (embedded key), reporting per-key variance + orphans
 - `save_data` — persist the `staging_*` summary table before the report
 - `report_table` — deterministic drill-down HTML report from a summary + detail table
 - `chat_download` — deliver the finished self-contained HTML report

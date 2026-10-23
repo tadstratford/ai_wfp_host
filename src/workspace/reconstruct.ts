@@ -81,6 +81,7 @@ export async function reconstructWfp(
       case "plan": wfp.plan = value as WfpFile["plan"]; break;
       case "todos": wfp.todos = value as WfpFile["todos"]; break;
       case "saved_prompts": wfp.saved_prompts = value as WfpFile["saved_prompts"]; break;
+      case "data_catalog": wfp.data_catalog = value as WfpFile["data_catalog"]; break;
       case "privacy_mask": wfp.privacy_mask = value as WfpFile["privacy_mask"]; break;
       default: break;
     }

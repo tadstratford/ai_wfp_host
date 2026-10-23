@@ -571,6 +571,23 @@ export function scanDataRows(
   return dataIndex;
 }
 
+/** Materialize every data row of a large tabular entry into row objects, using
+ *  the detected header row + key-column forward-fill (preamble skipped). This is
+ *  the "read it all at once" counterpart to `readCsvPage`, for discovery/reconcile
+ *  paths that must see the full table. */
+export function materializeLargeRows(
+  content: string,
+  opts: { headerIndex: number; keyColumns?: string[]; columns: string[] },
+): Record<string, unknown>[] {
+  const rows: Record<string, unknown>[] = [];
+  scanDataRows(content, { headerIndex: opts.headerIndex, keyColumns: opts.keyColumns ?? [] }, (cells) => {
+    const obj: Record<string, unknown> = {};
+    for (let i = 0; i < opts.columns.length; i++) obj[opts.columns[i]] = cells[i] ?? "";
+    rows.push(obj);
+  });
+  return rows;
+}
+
 /** Read a single page of data rows (with skipping + forward-fill applied). */
 export function readCsvPage(
   content: string,

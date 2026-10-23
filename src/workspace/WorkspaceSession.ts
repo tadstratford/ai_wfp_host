@@ -28,6 +28,7 @@ import type {
   ProvenanceEvent,
   ProvenanceAction,
   PrivacyMask,
+  DataCatalog,
 } from "wfp-format";
 import type { Rule } from "wfp-format/rule";
 import type { LLMLogEntry } from "wfp-format/logs";
@@ -370,6 +371,24 @@ export class WorkspaceSession {
     this.#recordChange(`data:${name}`, "delete", null);
     this.touch("data");
     return true;
+  }
+
+  // ── Data catalog (load-time schema + relationship/lineage index) ─────────
+  getDataCatalog(): DataCatalog | null {
+    this.#assertOpen();
+    const c = this.#wfp.data_catalog;
+    return c ? structuredClone(c) : null;
+  }
+
+  setDataCatalog(catalog: DataCatalog | null): void {
+    this.#assertOpen();
+    if (catalog === null) {
+      delete this.#wfp.data_catalog;
+    } else {
+      this.#wfp.data_catalog = structuredClone(catalog);
+    }
+    this.#recordChange("data_catalog", "upsert", this.#wfp.data_catalog ?? null);
+    this.touch("misc");
   }
 
   // ── Sessions (kind: chat | automation per .wfp spec) ──────────────────

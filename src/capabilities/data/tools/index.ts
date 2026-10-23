@@ -6,5 +6,18 @@ import deleteData from "./delete_data";
 import saveData from "./save_data";
 import reportTable from "./report_table";
 import compareData from "./compare_data";
+import reconcileRelationship from "./reconcile_relationship";
+import listRelationships from "./list_relationships";
 
-export const tools = [listData, getData, aggregateData, resolveDataShape, deleteData, saveData, reportTable, compareData];
+export const tools = [
+  listData,
+  getData,
+  aggregateData,
+  resolveDataShape,
+  deleteData,
+  saveData,
+  reportTable,
+  compareData,
+  reconcileRelationship,
+  listRelationships,
+];

@@ -71,6 +71,7 @@ function splitWfp(wfp: WfpFile): SectionPayload {
   if (wfp.plan !== undefined) misc.plan = wfp.plan;
   if (wfp.todos !== undefined) misc.todos = wfp.todos;
   if (wfp.saved_prompts !== undefined) misc.saved_prompts = wfp.saved_prompts;
+  if (wfp.data_catalog !== undefined) misc.data_catalog = wfp.data_catalog;
 
   return {
     metadata: JSON.stringify(wfp.metadata),
@@ -104,6 +105,7 @@ function joinWfp(payload: SectionPayload): WfpFile {
     if (misc.plan !== undefined) wfp.plan = misc.plan as WfpFile["plan"];
     if (misc.todos !== undefined) wfp.todos = misc.todos as WfpFile["todos"];
     if (misc.saved_prompts !== undefined) wfp.saved_prompts = misc.saved_prompts as WfpFile["saved_prompts"];
+    if (misc.data_catalog !== undefined) wfp.data_catalog = misc.data_catalog as WfpFile["data_catalog"];
   }
   return wfp;
 }

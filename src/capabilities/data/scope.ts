@@ -2,7 +2,7 @@ import { getSessionByDatabaseId } from "@backend/core/workspace/workspaceSession
 import { parseCsv } from "@shared/wfp-api/csv";
 import { buildTextMasker, type TextMasker } from "@backend/core/knowledge/autoMask";
 import { loadPrivacyMap } from "@backend/core/knowledge/index";
-import type { StagedLarge } from "@data/stage";
+import { materializeLargeRows, type StagedLarge } from "@data/stage";
 
 let currentDatabaseId: string | null = null;
 
@@ -28,6 +28,10 @@ export function toRows(entry: {
   content: unknown;
   content_type?: string | null;
   content_json?: unknown;
+  large?: boolean;
+  header_row?: number | null;
+  key_columns?: string[] | null;
+  columns?: string[];
 }): Record<string, unknown>[] | null {
   if (Array.isArray(entry.content_json)) {
     return entry.content_json as Record<string, unknown>[];
@@ -36,6 +40,13 @@ export function toRows(entry: {
   if (type === "csv" || type === "json_array") {
     if (typeof entry.content === "string") {
       if (type === "csv") {
+        if (entry.large && entry.header_row != null) {
+          return materializeLargeRows(entry.content, {
+            headerIndex: entry.header_row,
+            keyColumns: entry.key_columns ?? [],
+            columns: entry.columns ?? [],
+          });
+        }
         return parseCsv(entry.content);
       }
       try {

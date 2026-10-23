@@ -15,6 +15,7 @@ import {
 import { synthesize } from "./synth";
 import { normalizeData } from "./normalize/vers_1";
 import type { NormalizedDataSet } from "./normalize/vers_1";
+import { buildDataCatalog, refineDataCatalogWithJev, clearDataCatalog } from "./catalog";
 export { saveDataEntry, sanitizeDataName } from "./saveData";
 
 export interface UserDataItem {
@@ -358,6 +359,15 @@ export async function loadUserData(
 
   // Generate summary asynchronously — do not block the upload response
   generateUserDataSummary(databaseId, name, content).catch(() => {});
+
+  // Rebuild the deterministic data catalog (schema + relationships) at load,
+  // then refine rename/alias links with Jev in the background.
+  try {
+    buildDataCatalog(session);
+  } catch {
+    /* catalog is best-effort; never block the upload */
+  }
+  refineDataCatalogWithJev(session).catch(() => {});
 }
 
 export async function getUserData(
@@ -422,6 +432,12 @@ export async function updateUserData(
   }
 
   generateUserDataSummary(databaseId, name, content).catch(() => {});
+
+  try {
+    buildDataCatalog(session);
+  } catch {
+    /* catalog is best-effort */
+  }
 }
 
 export async function deleteUserData(
@@ -434,6 +450,11 @@ export async function deleteUserData(
   for (const n of session.getDataNames()) {
     if (n.startsWith(`synth_${name}_`)) session.deleteDataEntry(n);
   }
+  try {
+    buildDataCatalog(session);
+  } catch {
+    /* catalog is best-effort */
+  }
 }
 
 export async function clearAllUserData(databaseId: string): Promise<void> {
@@ -441,4 +462,5 @@ export async function clearAllUserData(databaseId: string): Promise<void> {
   for (const name of session.getDataNames()) {
     session.deleteDataEntry(name);
   }
+  clearDataCatalog(session);
 }

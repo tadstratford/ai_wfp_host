@@ -2,6 +2,7 @@ import type { Metadata } from "./metadata";
 import type { Workflow } from "./workflow";
 import type { Tool } from "./tool";
 import type { DataEntry } from "./data";
+import type { DataCatalog } from "./dataCatalog";
 import type { KnowledgePack } from "./knowledge";
 import type { Session } from "./session";
 import type { PlanEntry } from "./plan";
@@ -18,6 +19,8 @@ export interface WfpFile {
   workflows: Workflow[];
   tools?: Tool[];
   data?: Record<string, DataEntry>;
+  /** Load-time schema + relationship/lineage index (deterministic + Jev). */
+  data_catalog?: DataCatalog;
   knowledge?: KnowledgePack[];
   rules?: Rule[];
   sessions?: Session[];
