@@ -14,8 +14,8 @@ sqlite.db
 !.env.example
 .agents/
 
-# Runtime data directory (local only)
-data/
+# Runtime data directory (local only, repo root only — source `data/` dirs under src/ are tracked)
+/data/
 temp_*.db
 
 .vercel
