@@ -1,23 +1,20 @@
 /**
- * Privacy map — single source of truth for the real→fake masking map.
+ * Privacy mask — single source of truth for the real→fake masking map.
  *
- * Replaces the old positional-token scheme (`<eN>` / `<aN>`) with realistic
- * faker-style stand-ins generated deterministically from each real value, so
- * the LLM sees semantically meaningful data instead of opaque tokens.
+ * Stored in the top-level `.wfp` `privacy_mask` node (a `PrivacyMask` with
+ * structured entries carrying real/fake/source/addedAt/addedBy). Legacy `.wfp`
+ * files stored the map as `privacy-map` knowledge packs; those are read as a
+ * fallback and migrated to the node on the next write.
  *
- * Two packs back the map, both stored with scope "privacy-map" and never sent
- * to the LLM directly:
- *   - "privacy-map"            (manual)  — user-authored entity names
- *   - "privacy-map-automatic"  (auto)    — values discovered from data files
- *
- * Pack content is a JSON string of `[real, fake]` pairs. Legacy packs stored a
- * plain string[] of real values; those are decoded lazily and their fakes are
- * computed deterministically on read.
+ * Two sources back the map, both kept inside the node and never sent to the
+ * LLM directly:
+ *   - manual      — user-authored entity names
+ *   - automatic   — values discovered from data files
  */
 
 import { getSessionByDatabaseId } from "@backend/core/workspace/workspaceSessionStore";
-import { savePack, deletePack } from "./store";
 import { generateFakeValue } from "./fakeGen";
+import type { PrivacyMaskEntry } from "wfp-format/privacy";
 
 export const PRIVACY_MAP_NAME = "privacy-map";
 export const AUTO_MASK_NAME = "privacy-map-automatic";
@@ -35,9 +32,7 @@ export interface PrivacyEntry {
 
 type Pair = [string, string];
 
-function encodePairs(pairs: Pair[]): string {
-  return JSON.stringify({ v: 1, entries: pairs });
-}
+// ── Legacy pack fallback (decode old `[real, fake]` pack content) ──────────
 
 function isPair(x: unknown): x is Pair {
   return (
@@ -48,7 +43,6 @@ function isPair(x: unknown): x is Pair {
   );
 }
 
-/** Decode a pack's content (new JSON pairs or legacy string[] / lines). */
 function decodePairs(content: unknown): Pair[] {
   if (!content) return [];
   if (Array.isArray(content)) {
@@ -79,7 +73,7 @@ function decodePairs(content: unknown): Pair[] {
   return [];
 }
 
-function loadPackPairs(databaseId: string, name: string): Pair[] {
+function loadLegacyPackPairs(databaseId: string, name: string): Pair[] {
   const session = getSessionByDatabaseId(databaseId);
   const pack = session?.getKnowledgePack(name);
   if (!pack) return [];
@@ -107,22 +101,55 @@ function resolveFake(real: string, usedFakes: Set<string>): string {
  * "Franklin Fund LP" → "South Maple LP", then "South Maple LP" → "Pine Harbor
  * LP"). Keeping them would double-mask data and garble the reverse mapping.
  */
-export function dropChainEntries(entries: PrivacyEntry[]): PrivacyEntry[] {
+export function dropChainEntries<T extends { real: string; fake: string }>(
+  entries: T[],
+): T[] {
   const fakes = new Set<string>();
   for (const e of entries) fakes.add(e.fake);
   return entries.filter((e) => !fakes.has(e.real));
 }
 
-function loadEntries(databaseId: string): PrivacyEntry[] {
-  const seen = new Map<string, PrivacyEntry>();
+// ── Node access ────────────────────────────────────────────────────────────
+
+function loadNodeEntries(databaseId: string): PrivacyMaskEntry[] {
+  const session = getSessionByDatabaseId(databaseId);
+  if (!session) return [];
+  return session.getPrivacyMask().entries ?? [];
+}
+
+function saveNodeEntries(databaseId: string, entries: PrivacyMaskEntry[]): void {
+  const session = getSessionByDatabaseId(databaseId);
+  if (!session) return;
+  session.setPrivacyMask({ entries });
+}
+
+/**
+ * All entries (manual + automatic) as structured `PrivacyMaskEntry[]`, deduped
+ * by real value (first-seen wins). Reads the `privacy_mask` node; falls back
+ * to legacy `privacy-map` knowledge packs for old `.wfp` files.
+ */
+function loadMaskEntries(databaseId: string): PrivacyMaskEntry[] {
+  const nodeEntries = loadNodeEntries(databaseId);
+  if (nodeEntries.length > 0) {
+    const seen = new Map<string, PrivacyMaskEntry>();
+    for (const e of nodeEntries) {
+      if (!e.real || !e.fake || seen.has(e.real)) continue;
+      seen.set(e.real, e);
+    }
+    return dropChainEntries(Array.from(seen.values()));
+  }
+
+  // Legacy fallback — migrate old pack entries into node-form.
+  const seen = new Map<string, PrivacyMaskEntry>();
+  const now = new Date().toISOString();
   for (const [name, source] of [
     [PRIVACY_MAP_NAME, "manual"],
     [AUTO_MASK_NAME, "automatic"],
     [LEGACY_AUTO_MASK_NAME, "automatic"],
-  ] as Array<[string, PrivacyEntry["source"]]>) {
-    for (const [real, fake] of loadPackPairs(databaseId, name)) {
-      if (!real || !fake) continue;
-      if (!seen.has(real)) seen.set(real, { real, fake, source });
+  ] as Array<[string, PrivacyMaskEntry["source"]]>) {
+    for (const [real, fake] of loadLegacyPackPairs(databaseId, name)) {
+      if (!real || !fake || seen.has(real)) continue;
+      seen.set(real, { real, fake, source, addedAt: now });
     }
   }
   return dropChainEntries(Array.from(seen.values()));
@@ -130,7 +157,11 @@ function loadEntries(databaseId: string): PrivacyEntry[] {
 
 /** All manual + automatic entries (real→fake), deduplicated by real value. */
 export function listPrivacyEntries(databaseId: string): PrivacyEntry[] {
-  return loadEntries(databaseId);
+  return loadMaskEntries(databaseId).map(({ real, fake, source }) => ({
+    real,
+    fake,
+    source,
+  }));
 }
 
 /**
@@ -139,7 +170,7 @@ export function listPrivacyEntries(databaseId: string): PrivacyEntry[] {
  */
 export function loadPrivacyMap(databaseId: string): Map<string, string> | null {
   const map = new Map<string, string>();
-  for (const e of loadEntries(databaseId)) {
+  for (const e of listPrivacyEntries(databaseId)) {
     if (e.real !== e.fake) map.set(e.real, e.fake);
   }
   if (map.size === 0) return null;
@@ -149,7 +180,7 @@ export function loadPrivacyMap(databaseId: string): Map<string, string> | null {
 /** Reverse map (fake → real) sorted longest-fake-first for unmasking. */
 export function loadPrivacyReverseMap(databaseId: string): Map<string, string> | null {
   const map = new Map<string, string>();
-  for (const e of loadEntries(databaseId)) {
+  for (const e of listPrivacyEntries(databaseId)) {
     if (e.real !== e.fake) map.set(e.fake, e.real);
   }
   if (map.size === 0) return null;
@@ -158,15 +189,20 @@ export function loadPrivacyReverseMap(databaseId: string): Map<string, string> |
 
 /**
  * Replace the manual privacy map with a new entity list, preserving the fakes
- * for any retained real values (so existing summaries stay consistent).
- * Empty list deletes the pack.
+ * for any retained real values (so existing summaries stay consistent) and the
+ * existing automatic entries. Empty list leaves only the automatic entries.
  */
 export function setPrivacyEntities(databaseId: string, entities: string[]): void {
-  const existing = loadPackPairs(databaseId, PRIVACY_MAP_NAME);
-  const knownFake = new Map<string, string>(existing);
-  const usedFakes = new Set<string>(existing.map(([, f]) => f));
+  const existing = loadMaskEntries(databaseId);
+  const knownFake = new Map<string, string>();
+  const usedFakes = new Set<string>();
+  for (const e of existing) {
+    usedFakes.add(e.fake);
+    if (e.source === "manual") knownFake.set(e.real, e.fake);
+  }
 
-  const pairs: Pair[] = [];
+  const now = new Date().toISOString();
+  const manual: PrivacyMaskEntry[] = [];
   for (const raw of entities) {
     const real = raw.trim();
     if (!real) continue;
@@ -175,20 +211,12 @@ export function setPrivacyEntities(databaseId: string, entities: string[]): void
       fake = resolveFake(real, usedFakes);
       usedFakes.add(fake);
     }
-    pairs.push([real, fake]);
+    manual.push({ real, fake, source: "manual", addedAt: now });
   }
+  manual.sort((a, b) => b.real.length - a.real.length);
 
-  if (pairs.length === 0) {
-    deletePack(databaseId, PRIVACY_MAP_NAME);
-    return;
-  }
-  pairs.sort((a, b) => b[0].length - a[0].length);
-  savePack(databaseId, {
-    name: PRIVACY_MAP_NAME,
-    scope: "privacy-map",
-    tags: ["privacy"],
-    content: encodePairs(pairs),
-  });
+  const auto = existing.filter((e) => e.source === "automatic");
+  saveNodeEntries(databaseId, [...manual, ...auto]);
 }
 
 /**
@@ -197,38 +225,36 @@ export function setPrivacyEntities(databaseId: string, entities: string[]): void
  * of values newly added.
  */
 export function mergeAutoValues(databaseId: string, values: string[]): { added: number } {
-  const existing = loadPackPairs(databaseId, AUTO_MASK_NAME);
-  const seen = new Map<string, string>(existing);
-  // Seed collision-tracking with every known stand-in (manual + auto + legacy)
-  // so a fake discovered in tool results is never re-added as a new real value.
+  const existing = loadMaskEntries(databaseId);
+  const seen = new Map<string, PrivacyMaskEntry>();
   const usedFakes = new Set<string>();
-  for (const e of loadEntries(databaseId)) usedFakes.add(e.fake);
+  for (const e of existing) {
+    usedFakes.add(e.fake);
+    if (e.source === "automatic") seen.set(e.real, e);
+  }
+  const manual = existing.filter((e) => e.source === "manual");
   const before = seen.size;
 
+  const now = new Date().toISOString();
   for (const raw of values) {
     const real = raw.trim();
     if (!real || seen.has(real) || usedFakes.has(real)) continue;
     if (seen.size >= MAX_AUTO_MASK_TOTAL) break;
     const fake = resolveFake(real, usedFakes);
-    seen.set(real, fake);
+    seen.set(real, { real, fake, source: "automatic", addedAt: now });
     usedFakes.add(fake);
   }
 
   const added = seen.size - before;
   if (added > 0) {
-    savePack(databaseId, {
-      name: AUTO_MASK_NAME,
-      scope: "privacy-map",
-      tags: ["privacy"],
-      content: encodePairs(Array.from(seen.entries())),
-    });
+    saveNodeEntries(databaseId, [...manual, ...Array.from(seen.values())]);
   }
   return { added };
 }
 
 /** Remove the automated mask entirely (user clears it from the privacy page). */
 export function clearAutoMask(databaseId: string): void {
-  const session = getSessionByDatabaseId(databaseId);
-  session?.deleteKnowledgePack(AUTO_MASK_NAME);
-  session?.deleteKnowledgePack(LEGACY_AUTO_MASK_NAME);
+  const existing = loadMaskEntries(databaseId);
+  const manual = existing.filter((e) => e.source === "manual");
+  saveNodeEntries(databaseId, manual);
 }

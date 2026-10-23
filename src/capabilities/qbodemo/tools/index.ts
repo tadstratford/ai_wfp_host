@@ -1,6 +1,7 @@
 import qbodemoAccountsList from "./qbodemo_accounts_list";
 import qbodemoClassesList from "./qbodemo_classes_list";
 import qbodemoActualsFlat from "./qbodemo_actuals_flat";
+import qbodemoCashBalances from "./qbodemo_cash_balances";
 import qbodemoPnlReport from "./qbodemo_pnl_report";
 import qbodemoBalanceSheet from "./qbodemo_balance_sheet";
 import qbodemoJournalCreate from "./qbodemo_journal_create";
@@ -11,6 +12,7 @@ export const tools = [
   qbodemoAccountsList,
   qbodemoClassesList,
   qbodemoActualsFlat,
+  qbodemoCashBalances,
   qbodemoPnlReport,
   qbodemoBalanceSheet,
   qbodemoJournalCreate,

@@ -24,12 +24,15 @@ const PRIVACY_ICON = "M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.5
 
 const QBO_ICON = "M6.75 3h10.5a2.25 2.25 0 0 1 2.25 2.25v13.5A2.25 2.25 0 0 1 17.25 21H6.75A2.25 2.25 0 0 1 4.5 18.75V5.25A2.25 2.25 0 0 1 6.75 3Zm.75 4.5h9v1.5h-9V7.5Zm0 3.75h9v1.5h-9v-1.5Zm0 3.75h6v1.5h-6V15Z";
 
+const TIME_MACHINE_ICON = "M12 6v6h4.5m4.5 0a9 9 0 1 1-3-6.708";
+
 const CLIENT_NAV: NavItem[] = [
   { key: "chat", label: "Chat", href: "/app/chat", iconSvg: CHAT_ICON },
   { key: "overview", label: "Workflows", href: "/app/overview", iconSvg: HOME_ICON },
   { key: "privacy", label: "Privacy Map", href: "/app/privacy", iconSvg: PRIVACY_ICON },
   { key: "rules", label: "Rules", href: "/app/rules", iconSvg: SKILLS_ICON },
   { key: "data", label: "Data", href: "/app/data", iconSvg: DATA_ICON },
+  { key: "timemachine", label: "Time Machine", href: "/app/timemachine", iconSvg: TIME_MACHINE_ICON },
 ];
 
 const NAV_ACTIVE_CLS = "bg-brand-50 text-brand-600 dark:bg-brand-900/40 dark:text-brand-300";

@@ -21,7 +21,7 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TABLE_PRODUCERS = new Set(["aggregate_data", "judge_data", "get_data"]);
 /** Tools that produce a finished HTML report (consumed by a following
  *  chat_download via {{result}}). */
-const REPORT_PRODUCERS = new Set(["report_table", "report_qbo_pnl", "report_qbo_bs", "report_plan_variance"]);
+const REPORT_PRODUCERS = new Set(["report_table", "report_qbo_pnl", "report_qbo_bs", "report_plan_variance", "report_plan_cash_forecast"]);
 const PARAM_KEYS = new Set([
   "start_date", "end_date", "base", "compare", "version",
   "month_from", "month_to", "reference_month", "account",

@@ -11,4 +11,8 @@ export interface Metadata {
   period?: string;
   notes?: WorkspaceNote[];
   modules?: string[];
+  /** Identity-shell reference — the engagement this file belongs to. */
+  engagement_id?: string;
+  /** Identity-shell reference — the team responsible for this file. */
+  team_id?: string;
 }

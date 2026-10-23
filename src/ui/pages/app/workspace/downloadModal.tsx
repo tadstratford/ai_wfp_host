@@ -25,6 +25,10 @@ export const workspaceDownloadModalHandler = async (c: Context) => {
               <input type="checkbox" name="strip" value="sessions" class="rounded border-ink/20 text-brand-500 focus:ring-brand-500" />
               Exclude sessions
             </label>
+            <label class="flex items-center gap-2 text-sm text-ink-700 dark:text-white/80 cursor-pointer">
+              <input type="checkbox" name="strip" value="provenance" class="rounded border-ink/20 text-brand-500 focus:ring-brand-500" />
+              Exclude history (Time Machine)
+            </label>
           </div>
           <div class="flex items-center justify-end gap-2">
             <button

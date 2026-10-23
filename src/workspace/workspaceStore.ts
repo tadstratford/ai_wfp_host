@@ -36,7 +36,7 @@ const TABLE = "workspaces";
 // their own column (enc_sessions, enc_logs) — still part of the document,
 // encrypted with the same secret.
 
-const SECTION_COLS = ["metadata", "workflows", "tools", "data", "knowledge", "sessions", "logs", "misc"] as const;
+const SECTION_COLS = ["metadata", "workflows", "tools", "data", "knowledge", "sessions", "logs", "misc", "provenance", "privacy_mask"] as const;
 type SectionCol = (typeof SECTION_COLS)[number];
 
 interface SectionPayload {
@@ -48,6 +48,8 @@ interface SectionPayload {
   sessions: string | null;
   logs: string | null;
   misc: string | null;
+  provenance: string | null;
+  privacy_mask: string | null;
 }
 
 const COL_FOR: Record<SectionCol, string> = {
@@ -59,6 +61,8 @@ const COL_FOR: Record<SectionCol, string> = {
   sessions: "enc_sessions",
   logs: "enc_logs",
   misc: "enc_misc",
+  provenance: "enc_provenance",
+  privacy_mask: "enc_privacy_mask",
 };
 
 function splitWfp(wfp: WfpFile): SectionPayload {
@@ -77,6 +81,8 @@ function splitWfp(wfp: WfpFile): SectionPayload {
     sessions: wfp.sessions !== undefined ? JSON.stringify(wfp.sessions) : null,
     logs: wfp.logs !== undefined ? JSON.stringify(wfp.logs) : null,
     misc: Object.keys(misc).length > 0 ? JSON.stringify(misc) : null,
+    provenance: wfp.provenance !== undefined ? JSON.stringify(wfp.provenance) : null,
+    privacy_mask: wfp.privacy_mask !== undefined ? JSON.stringify(wfp.privacy_mask) : null,
   };
 }
 
@@ -90,6 +96,8 @@ function joinWfp(payload: SectionPayload): WfpFile {
   if (payload.knowledge !== null) wfp.knowledge = JSON.parse(payload.knowledge);
   if (payload.sessions !== null) wfp.sessions = JSON.parse(payload.sessions);
   if (payload.logs !== null) wfp.logs = JSON.parse(payload.logs);
+  if (payload.provenance != null) wfp.provenance = JSON.parse(payload.provenance);
+  if (payload.privacy_mask != null) wfp.privacy_mask = JSON.parse(payload.privacy_mask);
   if (payload.misc !== null) {
     const misc = JSON.parse(payload.misc) as Record<string, unknown>;
     if (misc.rules !== undefined) wfp.rules = misc.rules as WfpFile["rules"];
@@ -105,8 +113,10 @@ function encodeSection(json: string | null, secret: string | null): string | nul
   return secret ? encryptSection(json, secret) : json;
 }
 
-function decodeSection(stored: string | null, secret: string | null): string | null {
-  if (stored === null) return null;
+function decodeSection(stored: string | null | undefined, secret: string | null): string | null {
+  // `== null` catches both null and undefined: a column that doesn't exist yet
+  // (schema not migrated) comes back as `undefined` from SELECT *, not null.
+  if (stored == null) return null;
   if (isEncryptedSectionEnvelope(stored)) {
     if (!secret) {
       throw new WorkspaceOpenError(
@@ -135,6 +145,8 @@ interface WorkspaceRow {
   enc_sessions: string | null;
   enc_logs: string | null;
   enc_misc: string | null;
+  enc_provenance: string | null;
+  enc_privacy_mask: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -302,7 +314,9 @@ export async function listWorkspacesDetailed(userId: string): Promise<WorkspaceD
         (r.enc_knowledge?.length ?? 0) +
         (r.enc_sessions?.length ?? 0) +
         (r.enc_logs?.length ?? 0) +
-        (r.enc_misc?.length ?? 0),
+        (r.enc_misc?.length ?? 0) +
+        (r.enc_provenance?.length ?? 0) +
+        (r.enc_privacy_mask?.length ?? 0),
     }));
 }
 
@@ -401,6 +415,8 @@ function rowToPayload(row: WorkspaceRow): SectionPayload {
     sessions: row.enc_sessions,
     logs: row.enc_logs,
     misc: row.enc_misc,
+    provenance: row.enc_provenance,
+    privacy_mask: row.enc_privacy_mask,
   };
 }
 
@@ -414,6 +430,8 @@ function decodeRowPayload(row: WorkspaceRow, secret: string | null): SectionPayl
     sessions: decodeSection(row.enc_sessions, secret),
     logs: decodeSection(row.enc_logs, secret),
     misc: decodeSection(row.enc_misc, secret),
+    provenance: decodeSection(row.enc_provenance, secret),
+    privacy_mask: decodeSection(row.enc_privacy_mask, secret),
   };
 }
 
@@ -491,6 +509,8 @@ export async function createWorkspace(
     enc_sessions: encodeSection(payload.sessions, args.secret),
     enc_logs: encodeSection(payload.logs, args.secret),
     enc_misc: encodeSection(payload.misc, args.secret),
+    enc_provenance: encodeSection(payload.provenance, args.secret),
+    enc_privacy_mask: encodeSection(payload.privacy_mask, args.secret),
     created_at: now,
     updated_at: now,
   };
@@ -603,6 +623,8 @@ export async function saveWorkspace(args: SaveWorkspaceArgs): Promise<string> {
   if (!only || only.has("sessions")) patch.enc_sessions = encodeSection(payload.sessions, args.secret);
   if (!only || only.has("logs")) patch.enc_logs = encodeSection(payload.logs, args.secret);
   if (!only || only.has("misc")) patch.enc_misc = encodeSection(payload.misc, args.secret);
+  if (!only || only.has("provenance")) patch.enc_provenance = encodeSection(payload.provenance, args.secret);
+  if (!only || only.has("privacy_mask")) patch.enc_privacy_mask = encodeSection(payload.privacy_mask, args.secret);
   if (args.secretHint !== undefined) {
     patch.secret_hint = args.secretHint;
   }

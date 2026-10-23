@@ -8,7 +8,7 @@
  * pure function of the inputs, so it is reproducible at run time.
  */
 
-const BRAND_CSS = `
+export const BRAND_CSS = `
 :root{
   --wfp-brand:#534AB7; --wfp-brand-tint:#EEF2FF; --wfp-accent:#4f46e5;
   --wfp-ink:#1e1b4b; --wfp-muted:#6b7280; --wfp-line:#e5e7eb; --wfp-bg:#f8f9fc;

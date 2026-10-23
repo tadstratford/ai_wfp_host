@@ -547,7 +547,7 @@ const ALWAYS_AVAILABLE = [
 const COMPOSABLE_PRIMITIVES = [
   "get_data", "list_data", "resolve_data_shape", "aggregate_data", "judge_data",
   "check_data", "save_data", "set_param", "get_param",
-  "report_table", "report_qbo_pnl", "report_qbo_bs", "report_plan_variance",
+  "report_table", "report_qbo_pnl", "report_qbo_bs", "report_plan_variance", "report_plan_cash_forecast",
   "chat_download", "show_message",
 ];
 

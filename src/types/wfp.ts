@@ -10,6 +10,8 @@ import type { SavedPrompt } from "./prompt";
 import type { EncryptionEnvelope } from "./encryption";
 import type { Rule } from "./rule";
 import type { LLMLogEntry } from "./logs";
+import type { ProvenanceEvent } from "./provenance";
+import type { PrivacyMask } from "./privacy";
 
 export interface WfpFile {
   metadata: Metadata;
@@ -23,6 +25,10 @@ export interface WfpFile {
   todos?: TodoEntry[];
   saved_prompts?: SavedPrompt[];
   logs?: LLMLogEntry[];
+  /** Append-only change ledger — the "Time Machine" history. */
+  provenance?: ProvenanceEvent[];
+  /** Real→fake confidentiality map (top-level control node). */
+  privacy_mask?: PrivacyMask;
 }
 
 export type WfpFileOrEncrypted = WfpFile | EncryptionEnvelope;

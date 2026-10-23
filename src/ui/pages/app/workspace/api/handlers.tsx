@@ -46,19 +46,14 @@ export const workspaceExportHandler = async (c: Context) => {
   );
   if (strip.has("logs")) delete wfp.logs;
   if (strip.has("sessions")) delete wfp.sessions;
+  if (strip.has("provenance")) delete wfp.provenance;
 
   const content = JSON.stringify(wfp);
 
   const date = new Date().toISOString().slice(0, 10);
   const safeName = (wfp.metadata.workspace || "workspace").replace(/[^a-zA-Z0-9_\- ]/g, "").trim() || "workspace";
-  const stripSuffix =
-    strip.has("logs") && strip.has("sessions")
-      ? "-no-logs-sessions"
-      : strip.has("logs")
-        ? "-no-logs"
-        : strip.has("sessions")
-          ? "-no-sessions"
-          : "";
+  const stripped = ["logs", "sessions", "provenance"].filter((s) => strip.has(s));
+  const stripSuffix = stripped.length ? `-no-${stripped.join("-")}` : "";
   const filename = `${safeName}_${date}${stripSuffix}.wfp`;
 
   // After download, redirect if ?then=logout

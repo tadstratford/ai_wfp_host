@@ -261,6 +261,20 @@ export const updateSession = async (
   return host;
 };
 
+/** Extract a short "why" from a session's concluding assistant message, so the
+ *  workflow-completed checkpoint carries the actual outcome, not just a label. */
+function extractRationale(session: Session): string | undefined {
+  const msgs = session.messages ?? [];
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const m = msgs[i] as { role?: string; markdown?: string; html?: string } | undefined;
+    if (m?.role === "assistant") {
+      const text = (m.markdown ?? m.html ?? "").trim();
+      if (text) return text.slice(0, 320);
+    }
+  }
+  return undefined;
+}
+
 /**
  * Save/update full session to the active workspace.
  */
@@ -274,7 +288,19 @@ export const saveSession = async (
   }
   const ws = requireSessionByDatabaseId(databaseId);
   session.updatedAt = new Date();
-  ws.upsertSession(toSpec(session));
+  const spec = toSpec(session);
+  const prev = ws.getSession(session.session_id);
+  const justCompletedWorkflow =
+    !!session.activeWorkflowId &&
+    spec.status === "completed" &&
+    prev?.status !== "completed";
+  ws.upsertSession(spec);
+  if (justCompletedWorkflow) {
+    ws.recordCheckpoint({
+      label: `Workflow completed — ${session.sessionName || session.activeWorkflowId}`,
+      rationale: extractRationale(session),
+    });
+  }
 };
 
 /**

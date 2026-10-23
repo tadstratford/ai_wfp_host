@@ -35,6 +35,7 @@ import {
   WorkspaceOpenError,
   type WorkspaceListItem,
 } from "./workspaceStore";
+import { storeContent } from "./contentStore";
 
 // ── Origins ─────────────────────────────────────────────────────────────────
 
@@ -132,6 +133,7 @@ function attachAutoSave(session: WorkspaceSession): void {
       // Sections dirtied *during* the write (e.g. save_data landing mid-flush)
       // must stay dirty so the next flush persists them.
       const sections = session.getDirtySections();
+      let workspaceId: string;
       if (origin.kind === "memory") {
         // First real change to a blank workspace → create the hosted row now
         // (lazy creation avoids empty "Untitled" rows) and flip the origin.
@@ -141,6 +143,7 @@ function attachAutoSave(session: WorkspaceSession): void {
           secret: session.getSecret(),
           secretHint: null,
         });
+        workspaceId = meta.workspaceId;
         ORIGIN_REGISTRY.set(session, {
           kind: "supabase",
           workspaceId: meta.workspaceId,
@@ -148,6 +151,7 @@ function attachAutoSave(session: WorkspaceSession): void {
         });
         markSynced(session, meta.updatedAt);
       } else {
+        workspaceId = origin.workspaceId;
         const updatedAt = await storeSave({
           workspaceId: origin.workspaceId,
           wfp,
@@ -158,6 +162,9 @@ function attachAutoSave(session: WorkspaceSession): void {
       }
       session.clearDirtySections(sections);
       session.markSaved();
+      // Persist buffered content-addressed payloads so the "Time Machine" can
+      // reconstruct historical node values (best-effort, after the main save).
+      await flushPendingContent(workspaceId);
       retryAttempt = 0;
       if (retryTimer) {
         clearTimeout(retryTimer);
@@ -173,6 +180,18 @@ function attachAutoSave(session: WorkspaceSession): void {
     }
   };
 
+  const flushPendingContent = async (workspaceId: string): Promise<void> => {
+    const secret = session.getSecret();
+    const pending = session.drainPendingContent();
+    for (const { hash, value } of pending) {
+      try {
+        await storeContent(workspaceId, hash, JSON.stringify(value), secret);
+      } catch (err) {
+        console.error("[autosave] content store write failed:", err);
+      }
+    }
+  };
+
   session.onMutate(() => {
     if (timer) clearTimeout(timer);
     timer = setTimeout(() => {
@@ -182,6 +201,12 @@ function attachAutoSave(session: WorkspaceSession): void {
   });
 
   AUTOSAVE_FLUSH.set(session, flush);
+  // Checkpoint the end-of-session state before the final flush so the
+  // "Time Machine" ledger records "as of close". Runs first (hook order) so
+  // the checkpoint event is included in the flush below.
+  session.onBeforeClose(() => {
+    session.recordCheckpoint({ label: "Session closed" });
+  });
   // Final flush on ANY close path (logout, switch, idle timeout, shutdown).
   // Runs before the session is marked closed so exportWfpSnapshot still works.
   session.onBeforeClose(() => void flush());
@@ -210,6 +235,8 @@ function emptyWfp(name: string): WfpFile {
     data: {},
     knowledge: [],
     sessions: [],
+    provenance: [],
+    privacy_mask: { entries: [] },
   };
 }
 

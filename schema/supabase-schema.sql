@@ -115,6 +115,8 @@ CREATE TABLE IF NOT EXISTS workspaces (
   enc_sessions   TEXT,
   enc_logs       TEXT,
   enc_misc       TEXT,
+  enc_provenance TEXT,
+  enc_privacy_mask TEXT,
   created_at     TIMESTAMPTZ DEFAULT NOW(),
   updated_at     TIMESTAMPTZ DEFAULT NOW()
 );
@@ -138,6 +140,8 @@ ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS enc_knowledge TEXT;
 ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS enc_sessions TEXT;
 ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS enc_logs TEXT;
 ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS enc_misc TEXT;
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS enc_provenance TEXT;
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS enc_privacy_mask TEXT;
 
 DO $$
 BEGIN
@@ -510,6 +514,33 @@ ALTER TABLE workspace_workflows ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Service role full access on workspace_workflows" ON workspace_workflows;
 CREATE POLICY "Service role full access on workspace_workflows" ON workspace_workflows
   FOR ALL USING (true) WITH CHECK (true);
+
+-- ── workspace_content ─────────────────────────────────────────────────────────
+-- Content-addressed store of historical node versions for the "Time Machine".
+-- The provenance ledger records `newContentHash` (SHA-256 of the node's
+-- plaintext JSON); the actual historical payload lives here, keyed by that
+-- hash, so past values can be reconstructed for diffs and "reopen as of X".
+-- Encrypted with the same workspace secret when the workspace is private
+-- (plaintext when shared, matching the main workspaces sections). Deduped by
+-- (workspace_id, content_hash). Deleted automatically with the workspace row.
+
+CREATE TABLE IF NOT EXISTS workspace_content (
+  workspace_id  TEXT NOT NULL REFERENCES workspaces(workspace_id) ON DELETE CASCADE,
+  content_hash  TEXT NOT NULL,
+  enc_content   TEXT NOT NULL,
+  created_at    TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (workspace_id, content_hash)
+);
+
+CREATE INDEX IF NOT EXISTS idx_workspace_content_workspace
+  ON workspace_content(workspace_id);
+
+ALTER TABLE workspace_content ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Service role full access on workspace_content" ON workspace_content;
+CREATE POLICY "Service role full access on workspace_content" ON workspace_content
+  FOR ALL USING (true) WITH CHECK (true);
+
 
 -- ── workspace_grants ──────────────────────────────────────────────────────────
 -- Server-readable access grants for shared workflows/workspaces. A grant lets

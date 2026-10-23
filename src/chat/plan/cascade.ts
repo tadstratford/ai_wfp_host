@@ -25,6 +25,8 @@ import { getClassifierKey } from "@backend/core/user/getLLMApiKey";
 import { z } from "zod";
 import { callStructured } from "@backend/core/llm/structured";
 import { getSessionByDatabaseId } from "@backend/core/workspace/workspaceSessionStore";
+import { listCapabilities } from "@capabilities/registry";
+import { enabledSkillNamesForDatabase } from "@core/skills/loader";
 import { loadPrivacyMap } from "@backend/core/knowledge/index";
 import { maskText, discoverRequestValues } from "@backend/core/knowledge/autoMask";
 import { resolveDataName } from "./args";
@@ -211,6 +213,55 @@ function planningCompareVersion(raw: string): string {
   return "budget1";
 }
 
+const FORECAST_MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
+
+/** Deterministic cutover month from the request text ("through September",
+ *  "after May", "as of Q3"…) — null when the request doesn't name one. */
+function cutoverFromText(raw: string): number | null {
+  const t = raw.toLowerCase();
+  const m = t.match(/(?:through|after|as\s+of|up\s+to|since)\s+([a-z]+)/);
+  if (m) {
+    const name = m[1];
+    for (let i = 0; i < 12; i++) {
+      if (FORECAST_MONTHS[i].startsWith(name) || FORECAST_MONTHS[i].slice(0, 3) === name) {
+        return i + 1;
+      }
+    }
+  }
+  const p = t.match(/(?:through|after|as\s+of|up\s+to|since)\s+(?:month|period|p)?\s*(\d{1,2})/);
+  if (p) {
+    const n = Number(p[1]);
+    if (n >= 1 && n <= 12) return n;
+  }
+  return null;
+}
+
+/** Default cutover for "the rest of the year": the current calendar month,
+ *  clamped to the fiscal year (end of year once we're past it). */
+function defaultCutoverFor(fy: number): number {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = now.getMonth() + 1;
+  if (y > fy) return 12;
+  if (y < fy) return 0;
+  return Math.min(m, 12);
+}
+
+/** The enabled cash-balance feed tool for this workspace — capability-driven so
+ *  it works regardless of which skill Jev routed (budgeting vs qbodemo-budgeting). */
+function cashFeedTool(databaseId: string): string | null {
+  const enabledSkills = enabledSkillNamesForDatabase(databaseId);
+  for (const cap of listCapabilities()) {
+    const m = cap.manifest;
+    const enabled = !m.group || (m.skills ?? []).some((s) => enabledSkills.has(s));
+    if (!enabled) continue;
+    const names = new Set(cap.tools.map((t) => t.name));
+    if (names.has("qbodemo_cash_balances")) return "qbodemo_cash_balances";
+    if (names.has("qbo_cash_balances")) return "qbo_cash_balances";
+  }
+  return null;
+}
+
 /** QBO statement → report_qbo_pnl / report_qbo_bs → chat_download. */
 async function qboStatementPlan(
   req: PlanRequest,
@@ -315,6 +366,66 @@ async function planningVariancePlan(req: PlanRequest): Promise<PlanResult> {
     {
       tool_id: "chat_download",
       tool_parameters: { data: "{{result}}", filename: "budget-variance.html" },
+      label: "Download report",
+    },
+  ];
+  return { kind: "plan", plan: { steps }, missingRequired: [] };
+}
+
+/** Cash forecast → cash-balance feed → plan_forecast. */
+async function planningForecastPlan(req: PlanRequest): Promise<PlanResult> {
+  const feedTool = cashFeedTool(req.databaseId);
+  if (!feedTool) return { kind: "fallback", reason: "no cash-balance feed tool available" };
+
+  const toolId = "plan_forecast";
+  const params = await getToolParams(toolId);
+  const { values } = extractParams(toolId, req.rawMessage, params, req.clarifiedParams);
+
+  const fy = typeof values.fy === "number" ? values.fy : new Date().getFullYear();
+  const cutover =
+    typeof values.cutover_per === "number" && values.cutover_per >= 1 && values.cutover_per <= 12
+      ? values.cutover_per
+      : cutoverFromText(req.rawMessage) ?? defaultCutoverFor(fy);
+
+  if (cutover < 1 || cutover > 12) {
+    return {
+      kind: "clarify",
+      missing: ["plan_forecast.cutover_per"],
+      question:
+        'Through which month do you have actuals? (e.g. "through September")',
+    };
+  }
+
+  const tp: Record<string, unknown> = {
+    fy,
+    cutover_per: cutover,
+    source: "cash_balances",
+    method: "hold",
+  };
+  if (typeof values.account === "string") tp.account = values.account;
+
+  const report: Record<string, unknown> = { fy, cutover_per: cutover, method: "hold" };
+  if (typeof values.account === "string") report.account = values.account;
+
+  const steps: PlanStep[] = [
+    {
+      tool_id: feedTool,
+      tool_parameters: { start_date: `${fy}-01-01`, end_date: `${fy}-12-31`, store_to: "cash_balances" },
+      label: feedTool.startsWith("qbodemo_") ? "Pull demo cash balances" : "Pull QBO cash balances",
+    },
+    {
+      tool_id: "plan_forecast",
+      tool_parameters: tp,
+      label: "Build cash forecast",
+    },
+    {
+      tool_id: "report_plan_cash_forecast",
+      tool_parameters: report,
+      label: "Render cash forecast report",
+    },
+    {
+      tool_id: "chat_download",
+      tool_parameters: { data: "{{result}}", filename: "cash-forecast.html" },
       label: "Download report",
     },
   ];
@@ -498,6 +609,16 @@ const SHAPES: ShapeDef[] = [
     },
     matches: (f) => f.planning_report,
     build: async (req) => planningVariancePlan(req),
+  },
+  {
+    id: "planning-forecast",
+    priority: 100,
+    nouls: {
+      planning_forecast:
+        "Does this request ask to forecast future cash — project month-end bank/cash balances for the rest of a fiscal year?",
+    },
+    matches: (f) => f.planning_forecast,
+    build: async (req) => planningForecastPlan(req),
   },
   {
     id: "analysis",

@@ -25,10 +25,16 @@ import type {
   WfpFile,
   Workflow,
   SavedPrompt,
+  ProvenanceEvent,
+  ProvenanceAction,
+  PrivacyMask,
 } from "wfp-format";
 import type { Rule } from "wfp-format/rule";
 import type { LLMLogEntry } from "wfp-format/logs";
 import { getRules as _rulesGetAll, getRule as _rulesGetOne, upsertRule as _rulesUpsert, deleteRule as _rulesDelete } from "../rules/store";
+import { randomUUID } from "node:crypto";
+import { hashValue } from "./hash";
+import { getProducerContext } from "./producer";
 
 /** Hard cap on retained sessions per workspace. Older sessions are pruned on
  *  upsert (newest by `updated_at` kept). */
@@ -45,7 +51,9 @@ export type WfpSectionName =
   | "knowledge"
   | "sessions"
   | "logs"
-  | "misc";
+  | "misc"
+  | "provenance"
+  | "privacy_mask";
 
 const ALL_SECTIONS: WfpSectionName[] = [
   "metadata",
@@ -56,6 +64,8 @@ const ALL_SECTIONS: WfpSectionName[] = [
   "sessions",
   "logs",
   "misc",
+  "provenance",
+  "privacy_mask",
 ];
 
 export type CloseHook = () => void | Promise<void>;
@@ -111,6 +121,11 @@ export class WorkspaceSession {
   // Sections changed since the last successful flush, so auto-save can
   // re-encrypt only the dirty columns.
   readonly #dirtySections = new Set<WfpSectionName>();
+  // Content-addressed payloads pending write to the content store (keyed by
+  // hash). Drained by the auto-save flush so the "Time Machine" can reconstruct
+  // historical node values. Only small nodes are buffered (large `data` payloads
+  // are excluded).
+  readonly #pendingContent = new Map<string, unknown>();
 
   constructor(args: WorkspaceSessionArgs) {
     this.#userId = args.userId;
@@ -216,6 +231,7 @@ export class WorkspaceSession {
     this.#assertOpen();
     const cloned = structuredClone(patch);
     this.#wfp.metadata = { ...this.#wfp.metadata, ...cloned };
+    this.#recordChange("metadata", "upsert", this.#wfp.metadata);
     this.touch("metadata");
   }
 
@@ -238,6 +254,7 @@ export class WorkspaceSession {
     const idx = this.#wfp.workflows.findIndex((w) => w.id === clone.id);
     if (idx >= 0) this.#wfp.workflows[idx] = clone;
     else this.#wfp.workflows.push(clone);
+    this.#recordChange(`workflow:${clone.id}`, "upsert", clone);
     this.touch("workflows");
   }
 
@@ -247,7 +264,10 @@ export class WorkspaceSession {
     const before = this.#wfp.workflows.length;
     this.#wfp.workflows = this.#wfp.workflows.filter((w) => w.id !== id);
     const changed = this.#wfp.workflows.length < before;
-    if (changed) this.touch("workflows");
+    if (changed) {
+      this.#recordChange(`workflow:${id}`, "delete", null);
+      this.touch("workflows");
+    }
     return changed;
   }
 
@@ -270,6 +290,7 @@ export class WorkspaceSession {
     const idx = this.#wfp.tools.findIndex((t) => t.tool_id === clone.tool_id);
     if (idx >= 0) this.#wfp.tools[idx] = clone;
     else this.#wfp.tools.push(clone);
+    this.#recordChange(`tool:${clone.tool_id}`, "upsert", clone);
     this.touch("tools");
   }
 
@@ -279,7 +300,10 @@ export class WorkspaceSession {
     const before = this.#wfp.tools.length;
     this.#wfp.tools = this.#wfp.tools.filter((t) => t.tool_id !== toolId);
     const changed = this.#wfp.tools.length < before;
-    if (changed) this.touch("tools");
+    if (changed) {
+      this.#recordChange(`tool:${toolId}`, "delete", null);
+      this.touch("tools");
+    }
     return changed;
   }
 
@@ -302,6 +326,7 @@ export class WorkspaceSession {
     const idx = this.#wfp.knowledge.findIndex((p) => p.name === clone.name);
     if (idx >= 0) this.#wfp.knowledge[idx] = clone;
     else this.#wfp.knowledge.push(clone);
+    this.#recordChange(`knowledge:${clone.name}`, "upsert", clone);
     this.touch("knowledge");
   }
 
@@ -311,7 +336,10 @@ export class WorkspaceSession {
     const before = this.#wfp.knowledge.length;
     this.#wfp.knowledge = this.#wfp.knowledge.filter((p) => p.name !== name);
     const changed = this.#wfp.knowledge.length < before;
-    if (changed) this.touch("knowledge");
+    if (changed) {
+      this.#recordChange(`knowledge:${name}`, "delete", null);
+      this.touch("knowledge");
+    }
     return changed;
   }
 
@@ -331,6 +359,7 @@ export class WorkspaceSession {
     this.#assertOpen();
     if (!this.#wfp.data) this.#wfp.data = {};
     this.#wfp.data[name] = structuredClone(entry);
+    this.#recordChange(`data:${name}`, "upsert", this.#wfp.data[name]);
     this.touch("data");
   }
 
@@ -338,6 +367,7 @@ export class WorkspaceSession {
     this.#assertOpen();
     if (!this.#wfp.data || !(name in this.#wfp.data)) return false;
     delete this.#wfp.data[name];
+    this.#recordChange(`data:${name}`, "delete", null);
     this.touch("data");
     return true;
   }
@@ -366,6 +396,7 @@ export class WorkspaceSession {
       this.#wfp.sessions.sort((a, b) => (b.updated_at ?? "").localeCompare(a.updated_at ?? ""));
       this.#wfp.sessions = this.#wfp.sessions.slice(0, MAX_SESSIONS);
     }
+    this.#recordChange(`session:${clone.id}`, "upsert", clone);
     this.touch("sessions");
   }
 
@@ -375,7 +406,10 @@ export class WorkspaceSession {
     const before = this.#wfp.sessions.length;
     this.#wfp.sessions = this.#wfp.sessions.filter((s) => s.id !== sessionId);
     const changed = this.#wfp.sessions.length < before;
-    if (changed) this.touch("sessions");
+    if (changed) {
+      this.#recordChange(`session:${sessionId}`, "delete", null);
+      this.touch("sessions");
+    }
     return changed;
   }
 
@@ -388,6 +422,7 @@ export class WorkspaceSession {
   setPlan(plan: PlanEntry[]): void {
     this.#assertOpen();
     this.#wfp.plan = structuredClone(plan);
+    this.#recordChange("plan", "upsert", this.#wfp.plan);
     this.touch("misc");
   }
 
@@ -400,6 +435,7 @@ export class WorkspaceSession {
   setTodos(todos: TodoEntry[]): void {
     this.#assertOpen();
     this.#wfp.todos = structuredClone(todos);
+    this.#recordChange("todos", "upsert", this.#wfp.todos);
     this.touch("misc");
   }
 
@@ -412,6 +448,7 @@ export class WorkspaceSession {
   setSavedPrompts(prompts: SavedPrompt[]): void {
     this.#assertOpen();
     this.#wfp.saved_prompts = structuredClone(prompts);
+    this.#recordChange("saved_prompts", "upsert", this.#wfp.saved_prompts);
     this.touch("misc");
   }
 
@@ -429,13 +466,17 @@ export class WorkspaceSession {
   upsertRule(rule: Rule): void {
     this.#assertOpen();
     _rulesUpsert(this.#wfp, rule);
+    this.#recordChange(`rule:${rule.name}`, "upsert", _rulesGetOne(this.#wfp, rule.name));
     this.touch("misc");
   }
 
   deleteRule(name: string): boolean {
     this.#assertOpen();
     const deleted = _rulesDelete(this.#wfp, name);
-    if (deleted) this.touch("misc");
+    if (deleted) {
+      this.#recordChange(`rule:${name}`, "delete", null);
+      this.touch("misc");
+    }
     return deleted;
   }
 
@@ -460,7 +501,159 @@ export class WorkspaceSession {
       this.#wfp.logs.sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""));
       this.#wfp.logs = this.#wfp.logs.slice(0, MAX_LOGS);
     }
+    this.#recordChange(`log:${entry.id}`, "upsert", entry);
     this.touch("logs");
+  }
+
+  // ── Provenance (top-level `provenance` node — append-only ledger) ─────
+  getProvenance(): ProvenanceEvent[] {
+    this.#assertOpen();
+    return structuredClone(this.#wfp.provenance ?? []);
+  }
+
+  getProvenanceEvent(id: string): ProvenanceEvent | null {
+    this.#assertOpen();
+    const found = this.#wfp.provenance?.find((e) => e.id === id);
+    return found ? structuredClone(found) : null;
+  }
+
+  /** Append a pre-built event to the "Time Machine" ledger. Append-only — the
+   *  caller is responsible for a correct `prevHash` chain. Prefer
+   *  `recordCheckpoint` / the internal mutation recorder for normal use. */
+  appendProvenanceEvent(event: ProvenanceEvent): void {
+    this.#assertOpen();
+    this.#pushProvenanceEvent(event);
+  }
+
+  /** Append a named checkpoint marker to the ledger (a "kind: checkpoint"
+   *  event — a navigation landmark, not a snapshot). */
+  recordCheckpoint(opts: { label?: string; period?: string; rationale?: string } = {}): void {
+    this.#assertOpen();
+    const prev = this.#tailHash();
+    const producer = getProducerContext();
+    this.#pushProvenanceEvent({
+      id: randomUUID(),
+      prevHash: prev,
+      kind: "checkpoint",
+      action: "upsert",
+      target: "checkpoint",
+      newContentHash: null,
+      actor: this.#userId,
+      producer: producer.producer,
+      producerVersion: producer.producerVersion,
+      eventAt: new Date().toISOString(),
+      period: opts.period,
+      label: opts.label,
+      rationale: opts.rationale,
+    });
+  }
+
+  /** Record a period-close-style checkpoint that ALSO captures the full `data`
+   *  section (the books) so the workspace can be reconstructed as-of this point
+   *  in time. The data snapshot is buffered and written to the content store on
+   *  the next flush; its hash is stored on the checkpoint as `snapshotHash`. */
+  recordSnapshot(opts: { label?: string; period?: string } = {}): void {
+    this.#assertOpen();
+    const data = this.#wfp.data ?? {};
+    const snapshotHash = hashValue(data);
+    this.#pendingContent.set(snapshotHash, data);
+    const producer = getProducerContext();
+    this.#pushProvenanceEvent({
+      id: randomUUID(),
+      prevHash: this.#tailHash(),
+      kind: "checkpoint",
+      action: "upsert",
+      target: "checkpoint",
+      newContentHash: null,
+      actor: this.#userId,
+      producer: producer.producer,
+      producerVersion: producer.producerVersion,
+      eventAt: new Date().toISOString(),
+      period: opts.period,
+      label: opts.label ?? `Snapshot — ${new Date().toISOString().slice(0, 10)}`,
+      snapshotHash,
+    });
+  }
+
+  /** Hash of the current ledger tail (null when empty) — the chain link. */
+  #tailHash(): string | null {
+    const events = this.#wfp.provenance ?? [];
+    return events.length > 0 ? hashValue(events[events.length - 1]) : null;
+  }
+
+  #pushProvenanceEvent(event: ProvenanceEvent): void {
+    if (!this.#wfp.provenance) this.#wfp.provenance = [];
+    this.#wfp.provenance.push(structuredClone(event));
+    this.touch("provenance");
+  }
+
+  /** Centralized mutation recorder — appends a hash-chained "change" event for
+   *  a node add/delete/alter. Called by every mutating accessor (the single
+   *  chokepoint for tamper-evident capture). */
+  #recordChange(target: string, action: ProvenanceAction, newValue: unknown): void {
+    const producer = getProducerContext();
+    const contentHash = newValue === null ? null : hashValue(newValue);
+    if (contentHash !== null && !target.startsWith("data:")) {
+      this.#pendingContent.set(contentHash, newValue);
+    }
+    this.#pushProvenanceEvent({
+      id: randomUUID(),
+      prevHash: this.#tailHash(),
+      kind: "change",
+      action,
+      target,
+      newContentHash: contentHash,
+      actor: this.#userId,
+      producer: producer.producer,
+      producerVersion: producer.producerVersion,
+      eventAt: new Date().toISOString(),
+    });
+  }
+
+  /** Drain buffered content-addressed payloads (hash → value) and clear the
+   *  buffer. Called by the auto-save flush after a successful save. */
+  drainPendingContent(): Array<{ hash: string; value: unknown }> {
+    const out = Array.from(this.#pendingContent.entries()).map(([hash, value]) => ({ hash, value }));
+    this.#pendingContent.clear();
+    return out;
+  }
+
+  // ── Privacy mask (top-level `privacy_mask` node) ───────────────────────
+  getPrivacyMask(): PrivacyMask {
+    this.#assertOpen();
+    return structuredClone(this.#wfp.privacy_mask ?? { entries: [] });
+  }
+
+  setPrivacyMask(mask: PrivacyMask): void {
+    this.#assertOpen();
+    this.#wfp.privacy_mask = structuredClone(mask);
+    this.#recordChange("privacy_mask", "upsert", this.#wfp.privacy_mask);
+    this.touch("privacy_mask");
+  }
+
+  /** Current value of the node addressed by a provenance `target` string
+   *  (e.g. "workflow:<id>", "data:<name>", "metadata"). Returns null when the
+   *  node doesn't exist. Used by the Time Machine to diff "then vs now". */
+  getNodeValue(target: string): unknown {
+    this.#assertOpen();
+    const idx = target.indexOf(":");
+    const kind = idx === -1 ? target : target.slice(0, idx);
+    const name = idx === -1 ? "" : target.slice(idx + 1);
+    switch (kind) {
+      case "data": return this.#wfp.data?.[name] ?? null;
+      case "workflow": return this.#wfp.workflows?.find((w) => w.id === name) ?? null;
+      case "tool": return this.#wfp.tools?.find((t) => t.tool_id === name) ?? null;
+      case "knowledge": return this.#wfp.knowledge?.find((p) => p.name === name) ?? null;
+      case "rule": return this.#wfp.rules?.find((r) => r.name === name) ?? null;
+      case "session": return this.#wfp.sessions?.find((s) => s.id === name) ?? null;
+      case "log": return this.#wfp.logs?.find((l) => l.id === name) ?? null;
+      case "metadata": return this.#wfp.metadata ?? null;
+      case "plan": return this.#wfp.plan ?? null;
+      case "todos": return this.#wfp.todos ?? null;
+      case "saved_prompts": return this.#wfp.saved_prompts ?? null;
+      case "privacy_mask": return this.#wfp.privacy_mask ?? null;
+      default: return null;
+    }
   }
 
   // ── Pause Promises ────────────────────────────────────────────────────

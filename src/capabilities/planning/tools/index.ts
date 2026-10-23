@@ -7,7 +7,9 @@ import planActualsLoad from "./plan_actuals_load";
 import planBudgetLoad from "./plan_budget_load";
 import planVariance from "./plan_variance";
 import planBlend from "./plan_blend";
+import planForecast from "./plan_forecast";
 import reportPlanVariance from "./report_plan_variance";
+import reportPlanCashForecast from "./report_plan_cash_forecast";
 
 export const tools = [
   planDimGet,
@@ -19,5 +21,7 @@ export const tools = [
   planBudgetLoad,
   planVariance,
   planBlend,
+  planForecast,
   reportPlanVariance,
+  reportPlanCashForecast,
 ];
