@@ -2,6 +2,7 @@ import { aggregator } from "../../mcp/aggregator";
 import { setAllScopes } from "../../mcp/scope";
 import { setAppHook, setSessionDatabaseId, setSessionId } from "../../mcp/servers/app-wfp-sessions";
 import { setBuildContext } from "../../mcp/servers/app-wfp-build";
+import { setDiaryContext } from "../../mcp/servers/app-diary";
 import { setRunDepth, setRunSessionId } from "@workflow/runContext";
 import { callProvider } from "@backend/core/llm/providers";
 import type { ProviderMessage, ProviderToolSchema } from "@backend/core/llm/providers";
@@ -878,6 +879,7 @@ export async function processUserMessage(
   setRunDepth(0);
   setRunSessionId(io.sessionId);
   setBuildContext({ databaseId: io.databaseId, userId: io.userId, sessionId: io.sessionId });
+  setDiaryContext({ databaseId: io.databaseId });
   setAppHook({
     addMessage: async (msg) => {
       await io.addMessage(msg);

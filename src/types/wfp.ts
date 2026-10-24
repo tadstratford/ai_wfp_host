@@ -13,6 +13,7 @@ import type { Rule } from "./rule";
 import type { LLMLogEntry } from "./logs";
 import type { ProvenanceEvent } from "./provenance";
 import type { PrivacyMask } from "./privacy";
+import type { Diary } from "./diary";
 
 export interface WfpFile {
   metadata: Metadata;
@@ -32,6 +33,8 @@ export interface WfpFile {
   provenance?: ProvenanceEvent[];
   /** Real→fake confidentiality map (top-level control node). */
   privacy_mask?: PrivacyMask;
+  /** Compacting activity diary — the story of what happened, and by whom. */
+  diary?: Diary;
 }
 
 export type WfpFileOrEncrypted = WfpFile | EncryptionEnvelope;

@@ -237,6 +237,7 @@ function emptyWfp(name: string): WfpFile {
     sessions: [],
     provenance: [],
     privacy_mask: { entries: [] },
+    diary: { entries: [], summaries: [], narrative: [] },
   };
 }
 

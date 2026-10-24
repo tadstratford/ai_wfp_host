@@ -18,6 +18,7 @@ import {
   requireSessionByDatabaseId,
 } from "@backend/core/workspace/workspaceSessionStore";
 import { summarizeJudgeResult, type JudgeSummary } from "../judgeSummary";
+import { describeSession } from "@backend/core/workspace/diary/summarize";
 
 // ── status mapping ──────────────────────────────────────────────────────────
 
@@ -290,15 +291,29 @@ export const saveSession = async (
   session.updatedAt = new Date();
   const spec = toSpec(session);
   const prev = ws.getSession(session.session_id);
-  const justCompletedWorkflow =
-    !!session.activeWorkflowId &&
-    spec.status === "completed" &&
-    prev?.status !== "completed";
+  const justCompleted = spec.status === "completed" && prev?.status !== "completed";
+  const justCompletedWorkflow = !!session.activeWorkflowId && justCompleted;
   ws.upsertSession(spec);
   if (justCompletedWorkflow) {
     ws.recordCheckpoint({
       label: `Workflow completed — ${session.sessionName || session.activeWorkflowId}`,
       rationale: extractRationale(session),
+    });
+  }
+  if (justCompleted) {
+    const name = session.sessionName || session.session_id;
+    const sample = extractRationale(session) ?? "";
+    const entryId = ws.recordDiaryEntry({
+      summary: `Session "${name}" completed`,
+      tags: session.activeWorkflowId ? ["session", "workflow"] : ["session"],
+    });
+    void describeSession(databaseId, name, sample).then((desc) => {
+      if (ws.isClosed) return;
+      try {
+        ws.updateDiaryEntrySummary(entryId, desc);
+      } catch {
+        /* session closed mid-flight — ignore */
+      }
     });
   }
 };

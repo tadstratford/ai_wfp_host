@@ -117,6 +117,7 @@ CREATE TABLE IF NOT EXISTS workspaces (
   enc_misc       TEXT,
   enc_provenance TEXT,
   enc_privacy_mask TEXT,
+  enc_diary TEXT,
   created_at     TIMESTAMPTZ DEFAULT NOW(),
   updated_at     TIMESTAMPTZ DEFAULT NOW()
 );
@@ -142,6 +143,7 @@ ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS enc_logs TEXT;
 ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS enc_misc TEXT;
 ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS enc_provenance TEXT;
 ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS enc_privacy_mask TEXT;
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS enc_diary TEXT;
 
 DO $$
 BEGIN

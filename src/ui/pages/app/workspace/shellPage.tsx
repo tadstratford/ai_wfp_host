@@ -26,6 +26,8 @@ const QBO_ICON = "M6.75 3h10.5a2.25 2.25 0 0 1 2.25 2.25v13.5A2.25 2.25 0 0 1 17
 
 const TIME_MACHINE_ICON = "M12 6v6h4.5m4.5 0a9 9 0 1 1-3-6.708";
 
+const DIARY_ICON = "M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18c-2.305 0-4.408.867-6 2.292m0-14.25v14.25";
+
 const CLIENT_NAV: NavItem[] = [
   { key: "chat", label: "Chat", href: "/app/chat", iconSvg: CHAT_ICON },
   { key: "overview", label: "Workflows", href: "/app/overview", iconSvg: HOME_ICON },
@@ -33,6 +35,7 @@ const CLIENT_NAV: NavItem[] = [
   { key: "rules", label: "Rules", href: "/app/rules", iconSvg: SKILLS_ICON },
   { key: "data", label: "Data", href: "/app/data", iconSvg: DATA_ICON },
   { key: "timemachine", label: "Time Machine", href: "/app/timemachine", iconSvg: TIME_MACHINE_ICON },
+  { key: "diary", label: "Diary", href: "/app/diary", iconSvg: DIARY_ICON },
 ];
 
 const NAV_ACTIVE_CLS = "bg-brand-50 text-brand-600 dark:bg-brand-900/40 dark:text-brand-300";

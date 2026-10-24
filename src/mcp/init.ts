@@ -3,6 +3,7 @@ import { registerMcpTool } from "../core/tools/registry";
 import { initCapabilities } from "../capabilities";
 import { initSessionsServer } from "./servers/app-wfp-sessions";
 import { initBuildServer } from "./servers/app-wfp-build";
+import { initDiaryServer } from "./servers/app-diary";
 
 let initialized = false;
 
@@ -16,6 +17,7 @@ export async function initMcp() {
   // sessionId/appHook, `build` needs buildContext. Kept here deliberately.
   await aggregator.registerSubApp("sessions", initSessionsServer);
   await aggregator.registerSubApp("build", initBuildServer);
+  await aggregator.registerSubApp("diary", initDiaryServer);
 
   // Register all MCP tools into the workflow tool registry so workflows can
   // reference MCP tool_ids (e.g., "qbo_accounts_list") directly. The registry

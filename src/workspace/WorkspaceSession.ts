@@ -29,6 +29,8 @@ import type {
   ProvenanceAction,
   PrivacyMask,
   DataCatalog,
+  Diary,
+  DiaryEntry,
 } from "wfp-format";
 import type { Rule } from "wfp-format/rule";
 import type { LLMLogEntry } from "wfp-format/logs";
@@ -36,6 +38,7 @@ import { getRules as _rulesGetAll, getRule as _rulesGetOne, upsertRule as _rules
 import { randomUUID } from "node:crypto";
 import { hashValue } from "./hash";
 import { getProducerContext } from "./producer";
+import { summarizeEntries, summarizeSummaries, ENTRIES_PER_SUMMARY, SUMMARIES_PER_NARRATIVE } from "./diary/compaction";
 
 /** Hard cap on retained sessions per workspace. Older sessions are pruned on
  *  upsert (newest by `updated_at` kept). */
@@ -54,7 +57,8 @@ export type WfpSectionName =
   | "logs"
   | "misc"
   | "provenance"
-  | "privacy_mask";
+  | "privacy_mask"
+  | "diary";
 
 const ALL_SECTIONS: WfpSectionName[] = [
   "metadata",
@@ -67,6 +71,7 @@ const ALL_SECTIONS: WfpSectionName[] = [
   "misc",
   "provenance",
   "privacy_mask",
+  "diary",
 ];
 
 export type CloseHook = () => void | Promise<void>;
@@ -359,9 +364,20 @@ export class WorkspaceSession {
   setDataEntry(name: string, entry: NonNullable<WfpFile["data"]>[string]): void {
     this.#assertOpen();
     if (!this.#wfp.data) this.#wfp.data = {};
+    const isNew = !(name in this.#wfp.data);
     this.#wfp.data[name] = structuredClone(entry);
     this.#recordChange(`data:${name}`, "upsert", this.#wfp.data[name]);
+    if (isNew) this.#recordDataLoadDiary(name, entry);
     this.touch("data");
+  }
+
+  #recordDataLoadDiary(name: string, entry: NonNullable<WfpFile["data"]>[string]): void {
+    const stats: string[] = [];
+    if (entry.row_count !== undefined) stats.push(`${entry.row_count} rows`);
+    if (entry.columns?.length) stats.push(`${entry.columns.length} columns`);
+    const statText = stats.length ? ` (${stats.join(", ")})` : "";
+    const source = entry.source_filename ? ` from ${entry.source_filename}` : "";
+    this.recordDiaryEntry({ summary: `Loaded data "${name}"${statText}${source}`, tags: ["data-load"] });
   }
 
   deleteDataEntry(name: string): boolean {
@@ -484,8 +500,10 @@ export class WorkspaceSession {
 
   upsertRule(rule: Rule): void {
     this.#assertOpen();
+    const existed = _rulesGetOne(this.#wfp, rule.name) !== null;
     _rulesUpsert(this.#wfp, rule);
     this.#recordChange(`rule:${rule.name}`, "upsert", _rulesGetOne(this.#wfp, rule.name));
+    this.recordDiaryEntry({ summary: `${existed ? "Updated" : "Added"} rule "${rule.name}"`, tags: ["rule"] });
     this.touch("misc");
   }
 
@@ -494,6 +512,7 @@ export class WorkspaceSession {
     const deleted = _rulesDelete(this.#wfp, name);
     if (deleted) {
       this.#recordChange(`rule:${name}`, "delete", null);
+      this.recordDiaryEntry({ summary: `Deleted rule "${name}"`, tags: ["rule"] });
       this.touch("misc");
     }
     return deleted;
@@ -648,6 +667,85 @@ export class WorkspaceSession {
     this.#wfp.privacy_mask = structuredClone(mask);
     this.#recordChange("privacy_mask", "upsert", this.#wfp.privacy_mask);
     this.touch("privacy_mask");
+  }
+
+  // ── Diary (top-level `diary` node — compacting activity log) ────────────
+  getDiary(): Diary {
+    this.#assertOpen();
+    return structuredClone(this.#wfp.diary ?? { entries: [], summaries: [], narrative: [] });
+  }
+
+  setDiary(diary: Diary): void {
+    this.#assertOpen();
+    this.#wfp.diary = structuredClone(diary);
+    this.touch("diary");
+  }
+
+  /** Append one activity entry to the diary. When the entry window fills, it
+   *  compacts (deterministically) into a summary; summaries roll into the
+   *  narrative. LLM highlight generation happens lazily, elsewhere. Returns the
+   *  entry id (callers may upgrade the summary via `updateDiaryEntrySummary`). */
+  recordDiaryEntry(input: { summary: string; entities?: string[]; tags?: string[]; amount?: number }): string {
+    this.#assertOpen();
+    if (!this.#wfp.diary) this.#wfp.diary = { entries: [], summaries: [], narrative: [] };
+    const producer = getProducerContext();
+    const entry: DiaryEntry = {
+      id: randomUUID(),
+      eventAt: new Date().toISOString(),
+      actor: this.#userId,
+      producer: producer.producer,
+      producerVersion: producer.producerVersion,
+      summary: input.summary,
+      entities: input.entities,
+      tags: input.tags,
+      amount: input.amount,
+    };
+    this.#wfp.diary.entries.push(entry);
+    this.touch("diary");
+    this.#compactDiary();
+    return entry.id;
+  }
+
+  /** Replace a diary entry's summary text (e.g. with an LLM description). No-op
+   *  if the entry has already been compacted out of the hot window. */
+  updateDiaryEntrySummary(entryId: string, summary: string): boolean {
+    this.#assertOpen();
+    const e = this.#wfp.diary?.entries.find((x) => x.id === entryId);
+    if (!e) return false;
+    e.summary = summary;
+    this.touch("diary");
+    return true;
+  }
+
+  /** Fill a summary's LLM highlights (called lazily by the diary read path). */
+  setDiarySummaryHighlights(summaryId: string, highlights: string[]): boolean {
+    this.#assertOpen();
+    const s = this.#wfp.diary?.summaries.find((x) => x.id === summaryId);
+    if (!s) return false;
+    s.highlights = structuredClone(highlights);
+    this.touch("diary");
+    return true;
+  }
+
+  /** Fill a narrative chunk's LLM highlights. */
+  setDiaryNarrativeHighlights(narrativeId: string, highlights: string[]): boolean {
+    this.#assertOpen();
+    const n = this.#wfp.diary?.narrative.find((x) => x.id === narrativeId);
+    if (!n) return false;
+    n.highlights = structuredClone(highlights);
+    this.touch("diary");
+    return true;
+  }
+
+  #compactDiary(): void {
+    const diary = this.#wfp.diary;
+    if (!diary) return;
+    if (diary.entries.length >= ENTRIES_PER_SUMMARY) {
+      diary.summaries.push(summarizeEntries(diary.entries.splice(0, ENTRIES_PER_SUMMARY)));
+    }
+    if (diary.summaries.length >= SUMMARIES_PER_NARRATIVE) {
+      diary.narrative.push(summarizeSummaries(diary.summaries.splice(0, SUMMARIES_PER_NARRATIVE)));
+    }
   }
 
   /** Current value of the node addressed by a provenance `target` string

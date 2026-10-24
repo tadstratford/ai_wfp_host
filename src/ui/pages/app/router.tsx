@@ -9,6 +9,7 @@ import { rulesPanelView, rulesDetailView, rulesSaveHandler, rulesDeleteHandler }
 import { makeRuleView, startRuleInterview, ruleInterviewStep, finalizeRuleInterview, saveRuleHandler } from "./rules/ruleWizard";
 import { privacyPanelView, privacySaveHandler, privacyAutomateHandler, privacyAutomateClearHandler } from "./privacy/privacyPanel";
 import { timeMachineView, timeMachineDiffView, timeMachineCheckpointView, timeMachineSnapshotHandler, timeMachineDownloadView } from "./timemachine/timemachinePanel";
+import { diaryView } from "./diary/diaryPanel";
 import { logDetailView } from "./logs/logDetail";
 import { logCompareView } from "./logs/logCompare";
 import { clearDataHandler } from "./data/clearData";
@@ -198,6 +199,7 @@ appRouter.get("/timemachine/diff/:eventId", timeMachineDiffView);
 appRouter.get("/timemachine/checkpoint/:id", timeMachineCheckpointView);
 appRouter.get("/timemachine/download/:id", timeMachineDownloadView);
 appRouter.post("/timemachine/snapshot", timeMachineSnapshotHandler);
+appRouter.get("/diary", shellPage("diary", diaryView));
 appRouter.get("/rules", shellPage("rules", rulesPanelView));
 appRouter.get("/privacy", shellPage("privacy", privacyPanelView, (c) => pushUrl(c)));
 appRouter.get("/user", shellPage("user", userScreenView));

@@ -55,6 +55,7 @@ export type { LLMLogEntry } from "./logs";
 export type { AuditEntry } from "./audit";
 export type { ProvenanceEvent, ProvenanceKind, ProvenanceAction } from "./provenance";
 export type { PrivacyMask, PrivacyMaskEntry, PrivacySource } from "./privacy";
+export type { Diary, DiaryEntry, DiarySummary, DiaryNarrative } from "./diary";
 export type { EncryptionEnvelope } from "./encryption";
 export { isEncryptionEnvelope } from "./encryption";
 export type {

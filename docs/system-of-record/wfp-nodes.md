@@ -22,6 +22,7 @@ The document has two halves: the **work product** (content) and the **record**
 |---|---|
 | `privacy_mask` **(new)** | The confidentiality map (real → stand-in), promoted from a hidden knowledge-pack hack to a first-class, owned, auditable node with per-entry provenance |
 | `provenance` **(new)** | The append-only change ledger — the "Time Machine". Every mutation is an event; checkpoints are `kind: "checkpoint"` events (named markers, not separate snapshots) |
+| `diary` **(new)** | The compacting activity diary — a timestamped, actor-attributed narrative of what happened and by whom. See [`diary.md`](diary.md) |
 | `logs[]` | Evidence of LLM calls (already captured inside the file) |
 
 ## The `provenance` event
@@ -62,7 +63,8 @@ interface PrivacyMask {
 
 - `provenance` and `privacy_mask` are each their own section, stored as their
   own encrypted column (`enc_provenance`, `enc_privacy_mask`) in the `workspaces`
-  table — the same pattern `sessions` and `logs` use.
+  table — the same pattern `sessions` and `logs` use. The `diary` node adds a
+  third (`enc_diary`).
 - Historical node values live in a content-addressed `workspace_content` table
   (keyed by the event's `newContentHash`), encrypted with the workspace secret,
   so the Time Machine can reconstruct "old → new" for diffs. Large `data`

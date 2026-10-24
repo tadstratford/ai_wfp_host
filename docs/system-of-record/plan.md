@@ -83,3 +83,21 @@ Status: **later** — define only, no enforcement this phase.
 - [ ] `metadata.engagement_id` / `team_id` reference them; provenance stamps
       carry denormalized labels so the `.wfp` stays self-describing.
 - [ ] Deferred: RBAC, team-based grants, segregation-of-duties blocking.
+
+## 6. Diary (the activity story)
+
+Status: **done** — see [`diary.md`](diary.md).
+
+- [x] Types (`src/types/diary.ts`), `diary` node on `WfpFile`, `enc_diary` column
+      + schema.
+- [x] Compaction (`src/workspace/diary/compaction.ts`): 60 entries → summary,
+      20 summaries → narrative chunk, deterministic + `batchHash`.
+- [x] Capture hooks: session completion (chat + workflow), data load, rule
+      add/update/delete — via `WorkspaceSession.recordDiaryEntry`.
+- [x] LLM (`src/workspace/diary/summarize.ts`): session description
+      (fire-and-forget) + lazy highlight generation, privacy-masked.
+- [x] MCP `app-diary` server (`diary_narrative`, `diary_summaries`, `diary_search`)
+      + registration + context wiring.
+- [x] Diary UI (`/app/diary`) — narrative → summaries → entries drill-down, with
+      lazy LLM highlight fill on view.
+
