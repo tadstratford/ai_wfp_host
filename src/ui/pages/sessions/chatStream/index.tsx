@@ -359,6 +359,12 @@ export async function renderChatContent(
       />
         </div>
         <div class="hidden lg:flex w-72 shrink-0 flex-col gap-4 sticky top-0">
+          <div
+            id="plan-rail"
+            hx-get={`/sessions/api/plan?sessionId=${session.session_id}`}
+            hx-trigger="load, sse:new_message from:closest [sse-connect], sse:workflow_complete from:closest [sse-connect]"
+            hx-swap="innerHTML"
+          ></div>
           <Capabilities />
           <aside id="saved-prompts" class="min-h-0">
             <SavedPrompts prompts={savedPrompts} />

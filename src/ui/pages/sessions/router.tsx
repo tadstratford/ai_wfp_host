@@ -20,6 +20,7 @@ import { reportHandler } from "./reportHandler";
 import { chatHistoryHandler } from "./chatStream/chatHistory";
 import { savedPromptsHandler, savePromptHandler, deleteSavedPromptHandler } from "./chatStream/SavedPrompts";
 import { dataRefsHandler } from "./chatStream/DataRefs";
+import { planHandler } from "./chatStream/PlanRail";
 import { saveAsWorkflowPlanHandler, saveAsWorkflowBuildHandler } from "./saveAsWorkflow";
 
 export const sessionsRouter = new Hono();
@@ -66,6 +67,9 @@ sessionsRouter.post("/api/delete-saved-prompt", deleteSavedPromptHandler);
 
 // Data list panel (right rail of the chat view, under Saved prompts)
 sessionsRouter.get("/api/data-refs", dataRefsHandler);
+
+// Turn-plan checklist panel (right rail of the chat view, above Capabilities)
+sessionsRouter.get("/api/plan", planHandler);
 
 // Save chat session as a reusable workflow
 sessionsRouter.post("/save-as-workflow", saveAsWorkflowPlanHandler);
