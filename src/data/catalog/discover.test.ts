@@ -59,6 +59,26 @@ describe("discoverRelationships", () => {
     expect(rel).toBeUndefined();
   });
 
+  test("does not misclassify an exact ID-to-ID match as contains", () => {
+    // 18 transaction IDs vs 8 exception IDs: all 8 exception IDs appear in the
+    // transactions table, so an exact match exists but coverage is 8/18 ≈ 0.44
+    // (below the equals threshold). The old code counted these as "contains",
+    // which would make reconcile_relationship report 10 spurious "missing" rows.
+    const ids = Array.from({ length: 18 }, (_, i) => `IC-${String(i + 1).padStart(4, "0")}`);
+    const txn = {
+      name: "transactions",
+      columns: ["Txn ID", "Amount"],
+      rows: ids.map((id) => ({ "Txn ID": id, Amount: "100" })),
+    };
+    const exceptions = {
+      name: "exceptions",
+      columns: ["Txn ID", "Amount"],
+      rows: ids.slice(0, 8).map((id) => ({ "Txn ID": id, Amount: "50" })),
+    };
+    const rels = discoverRelationships([txn, exceptions]);
+    expect(rels.filter((r) => r.kind === "contains")).toHaveLength(0);
+  });
+
   test("discovers a partial contains link (active deals never appear in the ledger)", () => {
     // 30 schedule rows (21 dead + 9 active); only 13 dead deals are written off,
     // so coverage is 13/30 ≈ 0.43 — below the old 0.5 gate but a real link.

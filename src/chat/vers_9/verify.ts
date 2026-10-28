@@ -128,3 +128,76 @@ export async function verifyResult(input: VerifyInput): Promise<VerifyResult | n
 
   return { satisfies, complete, accurate, thorough, pass, reason };
 }
+
+export interface PlanVerifyResult {
+  /** 0..1 — every action's names/figures come from the findings, none invented. */
+  grounded: number;
+  /** 0..1 — the plan is actionable and addresses the material findings. */
+  actionable: number;
+  pass: boolean;
+  reason?: string;
+}
+
+export interface PlanActionInput {
+  label: string;
+  refs: string[];
+}
+
+/**
+ * Jev verification of a remediation plan (storytelling step 5) — the LLM
+ * proposes actions, Jev checks they are grounded in the findings and actionable
+ * before they are shown/executed. Same fail-closed shape as `verifyResult`.
+ */
+export async function verifyPlan(input: {
+  databaseId: string;
+  userId: string;
+  rawMessage: string;
+  plan: PlanActionInput[];
+  findings: string;
+}): Promise<PlanVerifyResult | null> {
+  let key: string;
+  try {
+    key = await getClassifierKey(input.userId);
+  } catch {
+    return null;
+  }
+
+  let privacyMap = loadPrivacyMap(input.databaseId);
+  const probe = {
+    system: "",
+    messages: [
+      { role: "user", content: input.rawMessage },
+      { role: "user", content: input.findings },
+    ],
+  };
+  const { added } = discoverRequestValues(input.databaseId, probe);
+  if (added > 0) privacyMap = loadPrivacyMap(input.databaseId);
+
+  const state = {
+    request: privacyMap ? maskText(input.rawMessage, privacyMap) : input.rawMessage,
+    findings: privacyMap ? maskText(input.findings, privacyMap) : input.findings,
+    plan: input.plan,
+  };
+
+  const questions: Record<string, Question> = {
+    grounded: {
+      type: "noul",
+      instructions:
+        "Is every action in the plan grounded in the findings — no invented entity/account names or figures that are not present in the findings?",
+    },
+    actionable: {
+      type: "noul",
+      instructions:
+        "Is the plan actionable and appropriate given the findings — each action is concrete and addresses a material finding, without inventing work the data does not support?",
+    },
+  };
+
+  const { response } = await askClassifier(state, questions, { apiKey: key });
+  const grounded = (response.answers.grounded as NoulAnswer).noul;
+  const actionable = (response.answers.actionable as NoulAnswer).noul;
+
+  const pass = grounded >= 0.6 && actionable >= 0.6;
+  const reason = pass ? undefined : `grounded ${grounded.toFixed(2)}, actionable ${actionable.toFixed(2)}`;
+
+  return { grounded, actionable, pass, reason };
+}

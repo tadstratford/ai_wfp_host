@@ -7,6 +7,7 @@ import {
 import { handleSimpleSSE } from "@backend/interfaces/streaming/simpleSSE";
 import { messagesHandler, feedbackHandler } from "./chatStream/messagesHandler";
 import { postMortemHandler } from "./chatStream/InlineAudit";
+import { reviewDetailHandler } from "./chatStream/reviewDetail";
 import { statusHandler } from "./chatStream/statusHandler";
 import { buttonsHandler } from "./chatStream/buttonsHandler";
 import { resumeHandler } from "./chatStream/resumeHandler";
@@ -51,6 +52,9 @@ sessionsRouter.post("/api/feedback", feedbackHandler);
 
 // Post-mortem analysis
 sessionsRouter.post("/api/post-mortem", postMortemHandler);
+
+// Display-element detail (click an element in the review/story card)
+sessionsRouter.post("/api/review-detail", reviewDetailHandler);
 
 // Chat history (previous sessions list)
 sessionsRouter.get("/api/history", chatHistoryHandler);

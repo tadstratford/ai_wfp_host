@@ -5,6 +5,9 @@ import type { User } from "@backend/types";
 import { ApprovalActions } from "./ApprovalActions";
 import { InteractiveForm } from "./InteractiveForm";
 import { InlineAudit } from "./InlineAudit";
+import { InlineReview } from "./InlineReview";
+import { InlinePlan } from "./InlinePlan";
+import { InlineResolution } from "./InlineResolution";
 
 /**
  * Get messages for a session
@@ -97,6 +100,8 @@ export const messagesHandler = async (c: Context) => {
     const k = classifyKind(m);
     // step-status / step markers fold into the live plan checklist below.
     if (k === "step-status" || k === "step") return false;
+    // storytelling progress markers fold into the story checklist below.
+    if (k === "story-progress" || k === "story-stage") return false;
     if (transient && (m.role === "system" || m.source === "workflow_start" || m.source === "workflow_end")) return false;
     return true;
   });
@@ -151,6 +156,50 @@ export const messagesHandler = async (c: Context) => {
       .replace(/\s+/g, " ")
       .trim();
 
+  // Storytelling progress — the latest `story-progress` anchor plus the
+  // `story-stage` markers emitted after it, rendered as a live 7-step checklist.
+  const storyMeta = (() => {
+    let anchorIdx = -1;
+    for (let i = allMsgs.length - 1; i >= 0; i--) {
+      if (allMsgs[i].json?.kind === "story-progress") { anchorIdx = i; break; }
+    }
+    if (anchorIdx < 0) return null;
+    const anchorJson = (allMsgs[anchorIdx]?.json ?? {}) as any;
+    const stages: string[] = Array.isArray(anchorJson.stages)
+      ? (anchorJson.stages as string[])
+      : [];
+    const statusByIndex: Record<number, string> = {};
+    for (let i = anchorIdx + 1; i < allMsgs.length; i++) {
+      const j = allMsgs[i].json as any;
+      if (j?.kind === "story-stage" && Number.isInteger(j.index)) {
+        statusByIndex[j.index] = j.status;
+      }
+    }
+    return { stages, statusByIndex };
+  })();
+
+  const storyChecklist = (stages: string[], statusByIndex: Record<number, string>) => {
+    const iconFor = (status?: string) => {
+      if (status === "done") return <span class="text-leaf-500">✓</span>;
+      if (status === "running") return <span class="text-brand-500">▶</span>;
+      if (status === "error") return <span class="text-coral-400">✗</span>;
+      return <span class="text-ink-300 dark:text-ink-600">○</span>;
+    };
+    return (
+      <div class="px-1 py-1">
+        <div class="text-xs font-semibold uppercase tracking-wide text-ink-400 dark:text-ink-500 mb-2">Story</div>
+        <ol class="space-y-1">
+          {stages.map((s: string, i: number) => (
+            <li class="flex items-start gap-2 text-sm text-ink-600 dark:text-white/80">
+              <span class="w-4 text-center font-semibold shrink-0">{iconFor(statusByIndex[i])}</span>
+              <span>{s}</span>
+            </li>
+          ))}
+        </ol>
+      </div>
+    );
+  };
+
   const kindIcon = (kind: string) => {
     if (kind === "llm-call" || kind === "jev-call") {
       return (
@@ -183,6 +232,7 @@ export const messagesHandler = async (c: Context) => {
 
   return c.html(
     <div class="space-y-3">
+      {storyMeta && storyMeta.stages.length > 0 && storyChecklist(storyMeta.stages, storyMeta.statusByIndex)}
       {contentMsgs.map((message: any, index: number) => {
         const kind = classifyKind(message);
         const isError = kind === "error";
@@ -255,6 +305,27 @@ export const messagesHandler = async (c: Context) => {
               audit={auditJson}
               sessionId={sessionId}
               postMortemHtml={postMortems[auditJson.auditId]}
+            />
+          ) : kind === "review" && message.json?.review ? (
+            /* Visual data-review card (relationship map + variance + verdicts) */
+            <InlineReview review={message.json.review} receiptsHtml={message.html || message.markdown} sessionId={sessionId} />
+          ) : kind === "story" && message.json?.bucket === "plan" ? (
+            /* Story beat 5 — remediation plan (ordered, clickable actions) */
+            <InlinePlan actions={message.json.actions ?? []} sessionId={sessionId} />
+          ) : kind === "story" && message.json?.bucket === "resolution" ? (
+            /* Story beat 7 — resolution (report download/preview + recap) */
+            <InlineResolution
+              actions={message.json.actions ?? []}
+              reportHtml={message.json.reportHtml}
+              reportCardHtml={message.html}
+            />
+          ) : kind === "story" && message.json?.review ? (
+            /* Story beat (setup/status/gap) — the same card, sectioned by bucket */
+            <InlineReview
+              review={message.json.review}
+              receiptsHtml={message.html || message.markdown}
+              bucket={message.json.bucket}
+              sessionId={sessionId}
             />
           ) : (
             /* Regular message */

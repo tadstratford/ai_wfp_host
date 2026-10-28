@@ -19,6 +19,12 @@ export type {
   RelationshipSource,
 } from "./dataCatalog";
 export type {
+  TableProfile,
+  ColumnProfile,
+  FootingCheck,
+  FootingSpec,
+} from "./profile";
+export type {
   Per,
   Kind,
   FactRow,
@@ -30,6 +36,17 @@ export { perKey, PER_KEYS, UNMAPPED } from "./budget";
 export type { KnowledgePack, KnowledgeScope } from "./knowledge";
 export type { Skill, SkillScope } from "./skill";
 export type { Rule } from "./rule";
+export type {
+  RuleSpec,
+  RuleFilterOp,
+  RuleFilterClause,
+  ClassifyOutcome,
+  MeasureSplit,
+  RuleApplication,
+  RuleClassification,
+  RuleFlagResult,
+  RuleAllocation,
+} from "./ruleApplication";
 export type {
   Session,
   Message,

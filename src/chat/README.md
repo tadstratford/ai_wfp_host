@@ -2,17 +2,19 @@
 
 > Last updated: 2026-10-23
 
-AI chat orchestration layer — receives user messages, runs deterministic gates, routes through Jev (Classifier), then produces a plan (a deterministic one-step "trivial plan", a Jev-composed node-plan, or an LLM-composed plan) and executes it inline; novel/bespoke work falls through to an LLM tool-calling loop.
+AI chat orchestration layer — receives user messages, runs deterministic gates, routes through Jev (Classifier), then produces a plan (a deterministic one-step "trivial plan", a Jev-composed node-plan, an LLM-composed plan, or a rule-aware materialized `TurnPlan`) and executes it inline; novel/bespoke work falls through to an LLM tool-calling loop (v8/v9) or becomes a plan step (v11).
 
-Two orchestrator versions are selectable via `process.env.ORCHESTRATOR` (default `vers_8`):
+Four orchestrator versions are selectable via `process.env.ORCHESTRATOR` (default `vers_8`):
 - **vers_8** — Jev + deterministic regex classify intent and compose a template plan; the LLM fills args and only falls back to a build loop for novel work. Determinism/cost-first.
 - **vers_9** — the LLM plans and executes through the build loop, then **Jev verifies the result** (`satisfies`/`complete`/`accurate` in `vers_9/verify.ts`). Completeness/accuracy-first. See `vers_9/`.
+- **vers_10** — wraps v9 with a **storytelling** framing (7-beat narrative + addressable element registry). See `vers_10/`.
+- **vers_11** — **rule-aware, plan-first**: every request becomes a materialized `TurnPlan` of typed steps (`data`/`communication`/`control`); workspace rules are selected by a Jev funnel, auto-classified, and enforced before the write gate. No free-form loop. See `vers_11/`.
 
 ## Files
 
 | File | Purpose |
 |---|---|
-| `index.ts` | Barrel. Re-exports `handleMessage` and `parseCommand` from vers_8. |
+| `index.ts` | Barrel. Selects `vers_8`/`vers_9`/`vers_10`/`vers_11` via `process.env.ORCHESTRATOR` and re-exports its `handleMessage` + `parseCommand`. |
 | `context/chatHistory.ts` | Builds chat history context for LLM prompts from session messages. |
 | `context/manifest.ts` | Builds a data inventory manifest for LLM context. |
 | `prompts/loader.ts` | Loads and parses `.md` prompt templates using gray-matter frontmatter. |

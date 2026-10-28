@@ -3,6 +3,7 @@ import { parseCsv } from "@shared/wfp-api/csv";
 import { buildTextMasker, type TextMasker } from "@backend/core/knowledge/autoMask";
 import { loadPrivacyMap } from "@backend/core/knowledge/index";
 import { materializeLargeRows, type StagedLarge } from "@data/stage";
+import type { DiscoveryTable } from "@data/catalog/discover";
 
 let currentDatabaseId: string | null = null;
 
@@ -86,4 +87,22 @@ export function stagedFromEntry(entry: any): StagedLarge {
 
 export function buildMasker(): TextMasker {
   return buildTextMasker(loadPrivacyMap(currentDatabaseId ?? "") ?? new Map<string, string>());
+}
+
+/** Resolve a data entry into the DiscoveryTable shape the deterministic engines
+ *  (profile / classify / split) consume, or null when not tabular. */
+export function toDiscoveryTable(name: string, entry: {
+  content: unknown;
+  content_type?: string | null;
+  content_json?: unknown;
+  large?: boolean;
+  header_row?: number | null;
+  key_columns?: string[] | null;
+  columns?: string[];
+  column_types?: Record<string, string> | null;
+}): DiscoveryTable | null {
+  const rows = toRows(entry);
+  if (rows === null) return null;
+  const columns = entry.columns ?? (rows.length ? Object.keys(rows[0]) : []);
+  return { name, columns, rows, columnTypes: entry.column_types ?? null };
 }

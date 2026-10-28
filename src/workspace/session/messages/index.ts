@@ -20,6 +20,17 @@ const generateMessageLinkMarkdown = async (
   const contentPreview =
     content.length > 40 ? content.substring(0, 40) + "..." : content;
 
+  // Structured data-review card: summarize from the payload, not the prose
+  // (the prose may match a stray "$0" and produce a misleading link label).
+  if ((message.json as any)?.kind === "review") {
+    const review = (message.json as any)?.review as
+      | { nodes?: any[]; verdicts?: any[] }
+      | undefined;
+    const tables = review?.nodes?.length ?? 0;
+    const findings = (review?.verdicts ?? []).filter((v: any) => (v?.severity ?? 0) >= 0.6).length;
+    return `**Data review** — ${tables} table${tables === 1 ? "" : "s"}, ${findings} finding${findings === 1 ? "" : "s"}`;
+  }
+
   switch (role) {
     case "user":
       // Use LLM to create intelligent summaries for user messages

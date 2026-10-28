@@ -56,7 +56,13 @@ export function collectTables(session: WorkspaceSession): DiscoveryTable[] {  co
     if (rows.length > MAX_DISCOVERY_ROWS) continue;
     const columns = entry.columns ?? Object.keys(rows[0]);
     if (columns.length === 0) continue;
-    tables.push({ name, columns, rows, source_filename: entry.source_filename ?? null });
+    tables.push({
+      name,
+      columns,
+      rows,
+      source_filename: entry.source_filename ?? null,
+      columnTypes: entry.column_types ?? null,
+    });
   }
   return tables;
 }

@@ -533,6 +533,8 @@ const ALWAYS_AVAILABLE = [
   "show_message", "chat_download", "set_param", "get_param", "save_data",
   "list_data", "get_data", "aggregate_data", "resolve_data_shape", "judge_data",
   "compare_data",
+  "reconcile_relationship", "list_relationships",
+  "profile_data", "classify_data", "split_data",
   "report_table", "report_qbo_pnl", "report_qbo_bs",
   "list_rules", "get_rule",
   "create_rule", "update_rule", "delete_rule",
@@ -549,6 +551,7 @@ const ALWAYS_AVAILABLE = [
 const COMPOSABLE_PRIMITIVES = [
   "get_data", "list_data", "resolve_data_shape", "aggregate_data", "judge_data",
   "check_data", "compare_data", "save_data", "set_param", "get_param",
+  "reconcile_relationship", "profile_data", "classify_data", "split_data",
   "report_table", "report_qbo_pnl", "report_qbo_bs", "report_plan_variance", "report_plan_cash_forecast",
   "chat_download", "show_message",
 ];

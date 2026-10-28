@@ -8,6 +8,9 @@ import reportTable from "./report_table";
 import compareData from "./compare_data";
 import reconcileRelationship from "./reconcile_relationship";
 import listRelationships from "./list_relationships";
+import profileData from "./profile_data";
+import classifyData from "./classify_data";
+import splitData from "./split_data";
 
 export const tools = [
   listData,
@@ -20,4 +23,7 @@ export const tools = [
   compareData,
   reconcileRelationship,
   listRelationships,
+  profileData,
+  classifyData,
+  splitData,
 ];

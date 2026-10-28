@@ -11,6 +11,8 @@ export interface DiscoveryTable {
   columns: string[];
   rows: Record<string, unknown>[];
   source_filename?: string | null;
+  /** inferred column types (column name → "number" | "boolean" | "string"). */
+  columnTypes?: Record<string, string> | null;
 }
 
 const MIN_MATCHES = 3;
@@ -107,7 +109,13 @@ export function measureCoverage(
       if (equalsHit === null && (rc === normalized || rc === lv.toLowerCase())) {
         equalsHit = rc;
       }
-      if (containsHit === null && phrases.some((p) => rc.includes(p))) {
+      // "contains" means the key is genuinely EMBEDDED in longer text (e.g. a
+      // deal name inside a "Write off - <Deal>: …" description). An exact cell
+      // that equals the key is not an embedded key — it is an ID-to-ID match and
+      // must not be misclassified as "contains", or reconcile_relationship would
+      // report spurious "missing" rows (e.g. every Txn ID absent from a
+      // worklist).
+      if (containsHit === null && phrases.some((p) => rc.includes(p) && rc.length > p.length)) {
         containsHit = rc;
       }
       if (equalsHit && containsHit) break;

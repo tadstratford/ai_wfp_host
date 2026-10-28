@@ -101,3 +101,123 @@ Status: **done** — see [`diary.md`](diary.md).
 - [x] Diary UI (`/app/diary`) — narrative → summaries → entries drill-down, with
       lazy LLM highlight fill on view.
 
+## 7. Generic deterministic data tools (LLM-orchestrated)
+
+Status: **in progress** — see [`../data-quality-pipeline.md`](../data-quality-pipeline.md).
+
+Goal: a small set of generic, deterministic data tools the chat LLM *selects* —
+given the user message, the workspace rules, and the data schema — instead of a
+load-time pipeline that precomputes findings with inference heuristics. The LLM
+picks the tool and the exact columns; the tool does the arithmetic. This replaces
+the earlier "precompute everything at load" design (which produced wrong
+authoritative numbers via column-inference — see the `test data and rules.wfp`
+review).
+
+- [x] Deterministic engines (pure, no LLM): `src/data/profile.ts` (`profileTable`,
+      `parseAmount`, `checkFooting`, `detectFootings`), `src/data/split.ts`
+      (`splitAmount`), `src/data/ruleApply.ts` (`evaluateRuleSpec`), plus the existing
+      `src/data/reconcileRelationship.ts` / `reconcile.ts` / `filter.ts` / `stats.ts`.
+- [x] Tools registered in the `data` capability: `profile_data` (per-column
+      completeness/duplicates + explicit footings), `classify_data` (multi-outcome
+      bucketing), `split_data` (cross-table percentage allocation). Footings are
+      explicit — the LLM names the columns; nothing is auto-inferred.
+- [x] Removed the precompute pipeline: `reconcileAll.ts`, `ruleResolve.ts`,
+      `data_catalog.profiles`/`reconciles`, the `rule_application` node, and
+      `Rule.spec` — rules are context only, not pre-evaluated.
+- [x] Chat wiring (vers_8 / vers_9) — soft constraint: added `profile_data` /
+      `classify_data` / `split_data` / `reconcile_relationship` / `list_relationships`
+      to both orchestrators' `ALWAYS_AVAILABLE` (and vers_8 `COMPOSABLE_PRIMITIVES`),
+      added them to vers_9 `VERIFIABLE_TOOLS`, and added prompt guidance to prefer the
+      deterministic tools over in-prose arithmetic. Escalate to a hard constraint /
+      vers_11 only if the model still computes by hand.
+- [x] Golden-fixture validation: `src/data/golden/cp3.ts` (real CP3 data + `GOLDEN`
+      constants) + `src/data/golden/cp3.test.ts` lock the engines to the
+      hand-verified figures (`156,437.41` footing, Ironwave `−3,204.01` variance,
+      EBITDA buckets, commitment split). Caught + fixed a `matchesClause` null-vs-
+      numeric bug (`src/data/filter.ts`).
+- [ ] (Optional) Reporting/dashboard consume the profile tool for data-health views.
+
+## 8. Storytelling data-review (chat v10)
+
+Status: **in progress** — see [`../data-storytelling.md`](../data-storytelling.md).
+
+Goal: frame working with financial data as a **story** ("accounting is
+communication") to lower cognitive burden. Break the chat orchestration into
+understandable buckets (sets), keep the reader involved by announcing each step,
+and make every visual element addressable (a model/human can point at it and
+click it for detail).
+
+- [x] **Setup/status visuals** (foundation, done in vers_9): relationship map,
+      variance strip, verdict cards — `vers_9` `buildReview` +
+      `InlineReview.tsx`. Node/edge tooltips + click→anchor to table details.
+- [x] **Persona as a rule** — a single `default_persona` rule in `wfp.rules[]`
+      (user-manageable); the persona bucket reads it and announces
+      "Reading as: …" (falls back to a generic reviewer when the rule is absent).
+      `vers_10` reads it via `WorkspaceSession.getRules()`.
+- [x] **Read-only MVP buckets** — `persona → setup → status → gap` as a new
+      `vers_10` (reusing vers_9's `runComposedPlan`/`tryComposeReviewPlan` and
+      delegating resume states to vers_9). Non-review requests delegate to vers_9.
+- [x] **Display-element registry + structured refs** — stable element ids
+      (`node-N`/`edge-N`/`var-N`/`verdict-N`) in the review payload, and
+      `refs: [...]` on each story message's `json`. The payload doubles as the
+      registry (no separate store yet).
+- [x] **Click → detail** — `POST /sessions/api/review-detail` appends an
+      element's detail to the end of the session; HTML elements (table rows,
+      verdict cards, variance rows, gap items) `hx-post` to it.
+- [x] **Plan → execute → resolution (report-only)** — step 5 `plan` is
+      LLM-composed (`buildRemediationPlan` in `vers_10/plan.ts`, deterministic
+      fallback) and Jev-verified (`verifyPlan`); step 6/7 render a self-contained
+      error report (`vers_10/resolution.ts` + `reportRenderer`) behind the
+      write-approval gate (`pendingExecute`). A live `story-progress`/`story-stage`
+      7-step checklist keeps the reader oriented.
+- [ ] **Journal posting (resolution, deferred)** — wire `qbo_journal_create` /
+      `qbo_gl_review` / GL schema into the resolution (adjusting entry, GL
+      journal) behind the write-approval gate; the report-only path is the
+      current boundary.
+
+## 9. Rule-aware orchestrator (chat v11)
+
+Status: **in progress**.
+
+Goal: one plan-first orchestrator (`ORCHESTRATOR=vers_11`) that turns every
+request into a materialized, maintained `TurnPlan` of typed steps — `data` (a
+tool + args), `communication` (an `addMessage`), `control` (approval / clarify).
+Workspace rules are always-on policy: selected by name + short description (a Jev
+funnel), auto-classified into an enforcement tier, and enforced as data steps
+placed **before** the write-approval gate — a flagged rule blocks the write.
+
+- [x] **Typed plan model** — `vers_11/types.ts` (`Step` union + `TurnPlan` with a
+      `cursor` anchor). Steps carry tool names + args + status only; evidence
+      lives in the workspace, not the plan.
+- [x] **Rule selection funnel** — `vers_11/select.ts`: two Jev calls (tag choice →
+      name→description choice), env-tunable thresholds (`RULE_TAG_THRESHOLD`,
+      `RULE_PROB_THRESHOLD`, `RULE_MAX_RULES`, `RULE_MAX_TAGS`, `RULE_MAX_CANDIDATES`).
+      Bounds a "hundreds of rules" client to a small candidate set.
+- [x] **Tier classification** — `vers_11/classifyRule.ts`: pure keyword→tier map
+      (reconcile/split/aggregate → `deterministic`; membership → `check_data`
+      (`classified`); else `audit`).
+- [x] **LLM-composed rule checks** — `vers_11/composeRuleChecks.ts` derives the
+      check tool args from rule text + data inventory, fail-closed (a rule that
+      can't be validated downgrades to `audit`/"not proven").
+- [x] **Compose + execute + resume** — `vers_11/composePlan.ts` (planner cascade→llm
+      data steps + rule checks + approval gate), `vers_11/executePlan.ts` (typed
+      executor + pass/flag interpreter; `approval` **blocked** on a flagged rule),
+      `vers_11/resume.ts` (resolve a paused control step).
+- [x] **Right-panel plan + review report** — `vers_11/executePlan.ts` emits the
+      `plan` checklist (`kind: "plan"` + `step-status` live updates) and, for a
+      review-shaped turn, renders the deterministic review card by reusing v9's
+      `buildReview`/`renderReviewReport` (exported).
+- [x] **Registration** — `vers_11` added to the `ORCHESTRATOR` selector
+      (`src/chat/index.ts`) and env knobs documented in `.env.example`.
+- [x] **Communication as a skill** — `story-data-review` (`src/core/skills/`) with
+      `## Tools needed: show_message`; its beats become `communication` steps, not
+      hardcoded arrays (replaces `vers_10`'s `STORY_STAGES`).
+- [ ] **Jev result verification** — reuse `vers_9/verify.ts` (`verifyResult` /
+      `verifyPlan`) as a post-plan gate; the deterministic review + rule-report are
+      currently the trust artifact.
+- [ ] **Full story beats** — wire the `story-data-review` markdown into per-beat
+      `show_message` emission (the beats are authored as a skill but not yet emitted
+      as a live narrative checklist).
+- [ ] **Prompt narrowing** — inject the *selected* rule subset (not all workspace
+      rules) into `buildSystemPrompt` for large rule sets.
+

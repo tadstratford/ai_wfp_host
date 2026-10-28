@@ -74,7 +74,10 @@ export function matchesClause(value: unknown, clause: FilterClause): boolean {
   if (op === "ne") return s !== String(target ?? "");
 
   // gt / gte / lt / lte — numeric when both sides parse as numbers, otherwise
-  // lexicographic (correct for ISO date strings).
+  // lexicographic (correct for ISO date strings). An empty value never satisfies
+  // a comparison (otherwise "" <= "7" matches as a string and empty cells would
+  // be bucketed into numeric outcomes).
+  if (s === "") return false;
   const num = toNumeric(value);
   const tnum = toNumeric(target);
   if (num !== null && tnum !== null) {

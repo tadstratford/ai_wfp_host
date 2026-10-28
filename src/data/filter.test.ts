@@ -13,6 +13,13 @@ describe("matchesClause", () => {
     expect(matchesClause("2027-01-01", { column: "Date", op: "gt", value: "2026-10-22" })).toBe(true);
   });
 
+  test("empty/null values never satisfy a numeric comparison", () => {
+    expect(matchesClause(null, { column: "x", op: "lte", value: 7 })).toBe(false);
+    expect(matchesClause("", { column: "x", op: "gte", value: 8 })).toBe(false);
+    expect(matchesClause(null, { column: "x", op: "gt", value: 0 })).toBe(false);
+    expect(matchesClause("", { column: "x", op: "lt", value: 10 })).toBe(false);
+  });
+
   test("string ops", () => {
     expect(matchesClause("x", { column: "Category", op: "eq", value: "x" })).toBe(true);
     expect(matchesClause("x", { column: "Category", op: "ne", value: "y" })).toBe(true);

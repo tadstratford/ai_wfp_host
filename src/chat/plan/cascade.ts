@@ -833,6 +833,177 @@ async function analysisPlan(
   return { kind: "plan", plan, missingRequired: [] };
 }
 
+// ── data-review shape: deterministic accountant's review battery ───────────
+// "review the interco data" — Jev composes a compact, deterministic battery over
+// the loaded tables (bulk read → profile → broad checks → relationships →
+// footings) instead of the LLM free-exploring table-by-table in the build loop.
+
+/** Broad, dataset-agnostic yes/no checks covering the eight review categories
+ *  (completeness, existence, footing, valuation/agreement, classification,
+ *  cutoff, consistency, no-guessing). Batched into one check_data (Jev) call per
+ *  table. */
+const REVIEW_CHECKS = [
+  { id: "missing_key_fields", question: "Are any rows missing a key identifier (an ID, entity/account name, date, or code)?" },
+  { id: "duplicates", question: "Are any rows exact duplicates of another row?" },
+  { id: "renamed_entities", question: "Does the same real entity/account appear under two different names anywhere?" },
+  { id: "miscoded", question: "Are any rows coded to an account/class/category that does not match their description or memo?" },
+  { id: "date_issues", question: "Are any dates missing, future, or outside the plausible period for this data?" },
+  { id: "amount_sign", question: "Are any amounts negative where a positive is expected, or vice versa?" },
+  { id: "unallocated", question: "Are any rows missing an allocation rule / category / reference they should have?" },
+  { id: "inconsistent_naming", question: "Is any entity/account named inconsistently across rows?" },
+];
+
+/** Columns whose name suggests a numeric "amount" to foot/aggregate. */
+const AMOUNT_HINT = /amount|total|balance|debit|credit|fee|revenue|cost|principal|interest|value|price|gross|net|sum/i;
+
+/** Preferred categorical grouping keys (entity/account/status/…). */
+const PRIMARY_GROUP_HINT = /entity|account|name|from\b|to\b|status|class|type|category|currency|rule/i;
+
+/** Fallback grouping keys (ids / codes / dates) — used only when no primary key
+ *  exists, so a "Txn ID" column doesn't win over "From Entity". */
+const SECONDARY_GROUP_HINT = /code|ref|id\b|period|date/i;
+
+interface ReviewEntry {
+  name: string;
+  columns: string[];
+  columnTypes: Record<string, string> | null;
+  rowCount: number;
+}
+
+/** Tabular data entries (with columns + inferred types) for the review battery. */
+function reviewInventory(databaseId: string): ReviewEntry[] {
+  try {
+    const ws = getSessionByDatabaseId(databaseId);
+    if (!ws) return [];
+    return ws
+      .getDataNames()
+      .map((name: string) => {
+        const e = ws.getDataEntry(name);
+        return {
+          name,
+          columns: Array.isArray(e?.columns) ? (e.columns as string[]) : [],
+          columnTypes: (e?.column_types as Record<string, string> | null) ?? null,
+          rowCount: typeof e?.row_count === "number" ? e.row_count : 0,
+        };
+      })
+      .filter((e) => e.columns.length > 0);
+  } catch {
+    return [];
+  }
+}
+
+function isNumericColumn(col: string, types: Record<string, string> | null): boolean {
+  if (types && typeof types[col] === "string") {
+    return /number|integer|float|decimal|currency|percent/i.test(types[col]);
+  }
+  return AMOUNT_HINT.test(col);
+}
+
+function pickMeasureCol(entry: ReviewEntry): string | null {
+  const numeric = entry.columns.filter((c) => isNumericColumn(c, entry.columnTypes));
+  const byHint = numeric.filter((c) => AMOUNT_HINT.test(c));
+  return byHint[0] ?? numeric[0] ?? null;
+}
+
+function pickGroupCol(entry: ReviewEntry): string | null {
+  const categorical = entry.columns.filter((c) => !isNumericColumn(c, entry.columnTypes));
+  const primary = categorical.filter((c) => PRIMARY_GROUP_HINT.test(c));
+  if (primary.length > 0) return primary[0];
+  const secondary = categorical.filter((c) => SECONDARY_GROUP_HINT.test(c));
+  return secondary[0] ?? categorical[0] ?? null;
+}
+
+/** Detect cross-foot columns: a "Total X" column that should equal the sum of
+ *  the columns whose names end in "X" (e.g. "Total Expenses" = "Fund I Expenses"
+ *  + "Fund II Expenses"). These become explicit `footings` on the profile step. */
+function detectFootings(columns: string[]): { leftColumn: string; rightColumns: string[] }[] {
+  const out: { leftColumn: string; rightColumns: string[] }[] = [];
+  for (const total of columns.filter((c) => /\btotal\b/i.test(c) && !/percent|%|rate/i.test(c))) {
+    const suffix = total.replace(/\btotal\b/i, "").trim();
+    if (suffix.length < 3) continue;
+    const parts = columns.filter((c) => c !== total && c.toLowerCase().endsWith(suffix.toLowerCase()));
+    if (parts.length >= 2) out.push({ leftColumn: total, rightColumns: parts });
+  }
+  return out;
+}
+
+/** Deterministic review battery: bulk read → per-table profile → broad checks on
+ *  the largest table → relationship discovery → per-table footing totals. */
+async function dataReviewPlan(
+  req: PlanRequest,
+  flags: Flags,
+  ctx: ShapeContext,
+): Promise<PlanResult> {
+  const inventory = reviewInventory(req.databaseId).filter((d) => !d.name.startsWith("staging_"));
+
+  // Resolve the target tables: the classifier's per-file matches ∪ the request's
+  // literal name matches; a review with no resolvable reference reviews ALL
+  // loaded tables (a review is inherently whole-workbook).
+  const nameMatches = resolveDataNames(req.rawMessage, inventory.map((d) => ({ name: d.name })));
+  let sources = Array.from(new Set([...ctx.dataFiles, ...nameMatches]));
+  if (sources.length === 0) sources = inventory.map((d) => d.name);
+  const target = inventory
+    .filter((d) => sources.includes(d.name))
+    .slice(0, 15)
+    .sort((a, b) => b.rowCount - a.rowCount);
+
+  if (target.length === 0) {
+    return { kind: "fallback", reason: "no tabular data to review" };
+  }
+
+  const steps: PlanStep[] = [];
+
+  // 1) One bulk read of every target table (collapses N sequential get_data).
+  steps.push({
+    tool_id: "get_data",
+    tool_parameters: { names: target.map((t) => t.name) },
+    label: `Read ${target.length} tables`,
+  });
+
+  // 2) Profile each table — completeness / duplicates / type violations, plus
+  //    explicit cross-foot footings when a "Total X" column decomposes.
+  for (const t of target) {
+    const tp: Record<string, unknown> = { name: t.name };
+    const footings = detectFootings(t.columns);
+    if (footings.length > 0) tp.footings = footings;
+    steps.push({ tool_id: "profile_data", tool_parameters: tp, label: `Profile ${t.name}` });
+  }
+
+  // 3) Broad Jev checks over the largest table (the ledger/transaction table).
+  const largest = target[0];
+  steps.push({
+    tool_id: "check_data",
+    tool_parameters: { name: largest.name, checks: REVIEW_CHECKS },
+    label: `Check ${largest.name}`,
+  });
+
+  // 4) Discover cross-table links (drives any reconciliation).
+  steps.push({ tool_id: "list_relationships", tool_parameters: {}, label: "Discover relationships" });
+
+  // 5) Footing: grand-total aggregate per table with a numeric column.
+  for (const t of target) {
+    const measure = pickMeasureCol(t);
+    if (!measure) continue;
+    const group = pickGroupCol(t);
+    const tp: Record<string, unknown> = { name: t.name, measures: [{ column: measure, fn: "sum" }] };
+    if (group && group !== measure) tp.group_by = [group];
+    steps.push({ tool_id: "aggregate_data", tool_parameters: tp, label: `Total ${t.name}` });
+  }
+
+  // Fail closed: any unresolved required arg → defer to the LLM build loop.
+  const missingRequired: string[] = [];
+  for (const s of steps) {
+    for (const m of await stepMissing(s.tool_id, s.tool_parameters)) {
+      missingRequired.push(`${s.tool_id}.${m}`);
+    }
+  }
+  if (missingRequired.length > 0) {
+    return { kind: "fallback", reason: `missing required: ${missingRequired.join(", ")}` };
+  }
+
+  return { kind: "plan", plan: { steps }, missingRequired: [] };
+}
+
 // ── Shape registry ──────────────────────────────────────────────────────────
 // Dispatch order is priority (descending). The classifier fan-out and the
 // dispatch loop in `plan()` are both derived from this table.
@@ -885,6 +1056,16 @@ const SHAPES: ShapeDef[] = [
     },
     matches: (f) => f.planning_forecast,
     build: async (req) => planningForecastPlan(req),
+  },
+  {
+    id: "data-review",
+    priority: 50,
+    nouls: {
+      review:
+        "Does this request ask to review, audit, analyze, explore, reconcile, check, foot, or tie-out the loaded data the way an accountant would — broadly surfacing findings across completeness, existence/orphans, footing, valuation/agreement across sources, classification/allocation, cutoff/timing, consistency, and no-guessing — rather than a specific aggregation, a specific yes/no check, or a report?",
+    },
+    matches: (f) => f.review,
+    build: (req, flags, ctx) => dataReviewPlan(req, flags, ctx),
   },
   {
     id: "analysis",

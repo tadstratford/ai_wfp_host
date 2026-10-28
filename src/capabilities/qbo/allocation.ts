@@ -6,6 +6,7 @@
  */
 
 import type { WorkspaceSession } from "@backend/core/workspace/WorkspaceSession";
+import { round2, splitAmount, type SplitShare } from "@data/split";
 
 export interface AllocationLine {
   account: string;
@@ -15,16 +16,11 @@ export interface AllocationLine {
   description?: string;
 }
 
-export interface AllocationShare {
-  entity: string;
-  amount: number;
-}
+export type AllocationShare = SplitShare;
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-export function round2(n: number): number {
-  return Math.round(n * 100) / 100;
-}
+export { round2, splitAmount };
 
 /** Normalize a period to a month name: "2026-05" → "May", "05"/"5" → "May". */
 export function monthLabel(period: string): string | null {
@@ -38,28 +34,6 @@ export function monthLabel(period: string): string | null {
   const n = Number(t);
   if (Number.isInteger(n) && n >= 1 && n <= 12) return MONTHS[n - 1];
   return null;
-}
-
-/** Split a total across entities by percentage. Rounds each share to cents and
- *  puts the rounding residual on the largest share so the split ties exactly. */
-export function splitAmount(
-  total: number,
-  percentages: { entity: string; percent: number }[],
-): AllocationShare[] {
-  const shares = percentages.map((p) => ({
-    entity: p.entity,
-    amount: round2((total * p.percent) / 100),
-  }));
-  const sum = round2(shares.reduce((s, x) => s + x.amount, 0));
-  const residual = round2(total - sum);
-  if (residual !== 0 && shares.length > 0) {
-    let maxIdx = 0;
-    for (let i = 1; i < shares.length; i++) {
-      if (shares[i].amount > shares[maxIdx].amount) maxIdx = i;
-    }
-    shares[maxIdx].amount = round2(shares[maxIdx].amount + residual);
-  }
-  return shares;
 }
 
 /** Emit balanced journal lines: debit each entity's share of `debitAccount`
