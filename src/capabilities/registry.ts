@@ -70,6 +70,11 @@ export function isReportTool(name: string): boolean {
   return tools.get(name)?.report === true;
 }
 
+/** True when this tool's result is display-ready markdown (relayed to the user). */
+export function isPresentableTool(name: string): boolean {
+  return tools.get(name)?.present === true;
+}
+
 export function listCapabilities(): CapabilityModule[] {
   return Array.from(capabilities.values());
 }

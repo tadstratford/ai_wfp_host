@@ -18,6 +18,7 @@ import type { ChoiceAnswer, Question } from "@shared/typesafe/types";
 import { getClassifierKey } from "@backend/core/user/getLLMApiKey";
 import { loadPrivacyMap } from "@backend/core/knowledge/index";
 import { maskText, discoverRequestValues } from "@backend/core/knowledge/autoMask";
+import { logAndFireJev } from "../jevLog";
 import type { SelectedRule, SelectionConfig } from "./types";
 
 const DEFAULTS: SelectionConfig = {
@@ -112,8 +113,22 @@ export async function selectRules(
   if (tags.length > 0) {
     const tagCriteria: Record<string, string> = {};
     for (const t of tags) tagCriteria[t] = t;
+    const tagQuestions = { tag: { type: "choice", instructions: "Which topic tag best matches the user's request?", criteria: tagCriteria } } as Record<string, Question>;
+    const t0 = Date.now();
     try {
-      const { response } = await askClassifier(state, { tag: { type: "choice", instructions: "Which topic tag best matches the user's request?", criteria: tagCriteria } } as Record<string, Question>, { apiKey: key });
+      const { response } = await askClassifier(state, tagQuestions, { apiKey: key });
+      await logAndFireJev({
+        databaseId,
+        sessionId: context?.sessionId,
+        mode: context?.mode,
+        phase: "rule-tags",
+        questions: tagQuestions,
+        state,
+        answers: response.answers,
+        model: response.model,
+        usage: response.usage,
+        durationMs: Date.now() - t0,
+      });
       const tagAnswer = response.answers.tag as ChoiceAnswer;
       for (const [t, p] of Object.entries(tagAnswer.probabilities ?? {})) {
         if (p >= cfg.tagThreshold) activeTags.add(t);
@@ -142,8 +157,22 @@ export async function selectRules(
   for (const r of candidates) ruleCriteria[r.name] = r.description || "(no description)";
 
   let ruleAnswer: ChoiceAnswer;
+  const ruleQuestions = { rule: { type: "choice", instructions: "Which workspace rule applies to the user's request?", criteria: ruleCriteria } } as Record<string, Question>;
+  const t1 = Date.now();
   try {
-    const { response } = await askClassifier(state, { rule: { type: "choice", instructions: "Which workspace rule applies to the user's request?", criteria: ruleCriteria } } as Record<string, Question>, { apiKey: key });
+    const { response } = await askClassifier(state, ruleQuestions, { apiKey: key });
+    await logAndFireJev({
+      databaseId,
+      sessionId: context?.sessionId,
+      mode: context?.mode,
+      phase: "rule-select",
+      questions: ruleQuestions,
+      state,
+      answers: response.answers,
+      model: response.model,
+      usage: response.usage,
+      durationMs: Date.now() - t1,
+    });
     ruleAnswer = response.answers.rule as ChoiceAnswer;
   } catch (err: any) {
     console.warn(`[vers_11] rule description stage failed: ${err.message}`);

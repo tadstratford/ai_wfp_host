@@ -15,6 +15,8 @@ import type { PlanRequest, PlanResult } from "../plan/planner";
 import { isDurableTool, isMutatingTool, listCapabilities } from "../../capabilities/registry";
 import { enabledSkillNamesForDatabase } from "../../core/skills/loader";
 import { getCapabilityIndex } from "@mcp/capabilityIndex";
+import { COMPOSABLE_PRIMITIVES } from "../plan/primitives";
+import { withTimeout } from "./util";
 import { composeRuleChecks } from "./composeRuleChecks";
 import type { ClassifiedRule, DataStep, Step, TurnPlan } from "./types";
 
@@ -31,17 +33,34 @@ function disabledToolNames(databaseId: string): Set<string> {
   return out;
 }
 
-async function buildToolRoster(databaseId: string): Promise<{ name: string; description: string }[]> {
+async function buildToolRoster(
+  databaseId: string,
+  selectedSkills: string[],
+): Promise<{ name: string; description: string }[]> {
   const capability = await getCapabilityIndex();
   const disabled = disabledToolNames(databaseId);
+  // Tools follow skills: the planner sees the routed skills' declared tools plus
+  // the composable primitives — not the full capability surface (which would
+  // dilute a one-shot LLM plan and widen the hallucination surface).
+  const declared = new Set<string>();
+  for (const skill of selectedSkills) {
+    const entry = capability.skills.get(skill);
+    if (entry) for (const t of entry.tools) declared.add(t);
+  }
   return [...capability.tools.values()]
-    .filter((t) => !ROUTING_TOOLS.has(t.name) && !disabled.has(t.name))
+    .filter(
+      (t) =>
+        !ROUTING_TOOLS.has(t.name) &&
+        !disabled.has(t.name) &&
+        (declared.has(t.name) || COMPOSABLE_PRIMITIVES.includes(t.name)),
+    )
     .map((t) => ({ name: t.name, description: t.description }));
 }
 
 export interface ComposeInput {
   databaseId: string;
   userId: string;
+  sessionId?: string;
   rawMessage: string;
   mode: string;
   selectedSkills: string[];
@@ -53,11 +72,12 @@ export interface ComposeInput {
 }
 
 export async function composePlan(input: ComposeInput): Promise<TurnPlan> {
-  const roster = await buildToolRoster(input.databaseId);
+  const roster = await buildToolRoster(input.databaseId, input.selectedSkills);
 
   const planRequest: PlanRequest = {
     databaseId: input.databaseId,
     userId: input.userId,
+    sessionId: input.sessionId,
     rawMessage: input.rawMessage,
     tools: roster,
     activeSkills: input.selectedSkills,
@@ -67,16 +87,17 @@ export async function composePlan(input: ComposeInput): Promise<TurnPlan> {
     clarifiedParams: input.clarifiedParams,
   };
 
-  // cascade → llm. No free-form loop: every request is a plan.
+  // cascade → llm. No free-form loop: every request is a plan. Planner calls are
+  // bounded so a hang surfaces as a fallback instead of silently stalling.
   let result: PlanResult;
   try {
-    result = await getPlanner("cascade").plan(planRequest);
+    result = await withTimeout(getPlanner("cascade").plan(planRequest), 30_000, "cascade planner");
   } catch (err: any) {
     result = { kind: "fallback", reason: `cascade planner failed: ${err.message}` };
   }
   if (result.kind !== "plan") {
     try {
-      result = await getPlanner("llm").plan(planRequest);
+      result = await withTimeout(getPlanner("llm").plan(planRequest), 60_000, "llm planner");
     } catch (err: any) {
       result = { kind: "fallback", reason: `llm planner failed: ${err.message}` };
     }
@@ -89,6 +110,7 @@ export async function composePlan(input: ComposeInput): Promise<TurnPlan> {
       kind: "control",
       control: "clarify",
       prompt: result.question ?? `I need more information: ${(result.missing ?? []).join(", ")}.`,
+      missing: result.missing ?? [],
       status: "pending",
     });
     return {

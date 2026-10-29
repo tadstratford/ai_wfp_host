@@ -33,6 +33,10 @@ export interface AnalysisBreadcrumb {
 export interface PlanRequest {
   databaseId: string;
   userId: string;
+  /** Present when planning a live chat turn — enables Jev call logging. */
+  sessionId?: string;
+  /** Chat mode (build/email), for Jev call logging. */
+  mode?: string;
   rawMessage: string;
   /** Candidate components (name + description). The orchestrator passes the
    *  narrow "composable primitives + skills' declared tools" roster. */

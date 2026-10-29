@@ -5,7 +5,8 @@ export type ContentType =
   | "json_array"
   | "json_object"
   | "json_cells"
-  | "text";
+  | "text"
+  | "xlsx";
 
 export interface DataEntry {
   content: string | EncryptionEnvelope;

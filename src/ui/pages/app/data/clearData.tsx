@@ -1,6 +1,7 @@
 import { Context } from "hono";
 import type { User } from "@backend/types";
 import { clearAllUserData } from "@backend/core/user-data/index";
+import { flushActiveWorkspace } from "@backend/core/workspace/workspaceLifecycle";
 
 /**
  * POST /app/clear-data — clears all data from app_user_data.
@@ -16,6 +17,9 @@ export const clearDataHandler = async (c: Context) => {
   }
 
   await clearAllUserData(user.currentDatabaseId);
+  // Persist immediately (the auto-save is debounced; a clear must survive a
+  // refresh or restart, not just the idle timer).
+  await flushActiveWorkspace(user.currentDatabaseId);
   console.log("🧹 [App] Data cleared");
 
   // If called from the data panel (targets #data-file-list), return empty state HTML

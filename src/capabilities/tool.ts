@@ -22,6 +22,7 @@ export function defineTool<const Args extends ZodRawShapeCompat>(
     mutating?: boolean;
     durable?: boolean;
     report?: boolean;
+    present?: boolean;
     handler: ToolCallback<Args>;
   },
 ): ToolDef {

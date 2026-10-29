@@ -179,6 +179,11 @@ click it for detail).
 
 Status: **in progress**.
 
+Build contract / harness invariants live in **`src/chat/vers_11/README.md`** — the
+stable-harness rules (no data/message-type branching, tools-only, self-contained,
+minimal regex, three computation tiers, session-context cleaning, config surface,
+feedback-updated plan).
+
 Goal: one plan-first orchestrator (`ORCHESTRATOR=vers_11`) that turns every
 request into a materialized, maintained `TurnPlan` of typed steps — `data` (a
 tool + args), `communication` (an `addMessage`), `control` (approval / clarify).
@@ -212,6 +217,14 @@ placed **before** the write-approval gate — a flagged rule blocks the write.
 - [x] **Communication as a skill** — `story-data-review` (`src/core/skills/`) with
       `## Tools needed: show_message`; its beats become `communication` steps, not
       hardcoded arrays (replaces `vers_10`'s `STORY_STAGES`).
+- [x] **Present results** — a read-only turn whose final data step is a
+      presentable tool relays the tool's result to the user as markdown,
+      closing the "list the data" silent-drop gap. The tool opts in via a
+      `present` flag on `CapabilityTool` (`isPresentableTool` in
+      `capabilities/registry.ts`); the executor (`vers_11/executePlan.ts`)
+      relays it. `list_data` returns markdown and is relayed verbatim;
+      `get_data` returns structured JSON (kept JSON for the LLM/workflow
+      consumers), which the executor formats via `renderGetDataResult`.
 - [ ] **Jev result verification** — reuse `vers_9/verify.ts` (`verifyResult` /
       `verifyPlan`) as a post-plan gate; the deterministic review + rule-report are
       currently the trust artifact.

@@ -77,7 +77,9 @@ function buildDataInventory(databaseId: string): string {
   try {
     const ws = getSessionByDatabaseId(databaseId);
     if (!ws) return "";
-    const names = ws.getDataNames();
+    const names = ws.getDataNames().filter(
+      (name) => ws.getDataEntry(name)?.content_type !== "xlsx",
+    );
     if (names.length === 0) return "";
 
     return names

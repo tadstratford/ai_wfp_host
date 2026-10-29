@@ -28,6 +28,7 @@ import { classifyRule } from "./classifyRule";
 import { composePlan } from "./composePlan";
 import { executePlan, emitPlanMessage, persistPlan } from "./executePlan";
 import { resumePlan } from "./resume";
+import { persistClarifiedParams } from "../plan/clarify";
 import type { ClassifiedRule, SelectedRule, TurnPlan } from "./types";
 import type { MetaData } from "wfp-api";
 
@@ -99,6 +100,23 @@ export async function processUserMessage(
         await io.addMessage({ markdown: "Cancelled.", json: { kind: "meta" } });
         return;
       }
+      // Clarify resume — resolve the answer into typed params, then re-compose a
+      // fresh plan (the clarify step itself carries no data steps, so simply
+      // advancing the cursor would dead-end). Mirrors vers_8's clarification resume.
+      if (step.control === "clarify") {
+        const fresh = (await getSession(io.databaseId, io.sessionId)) ?? session;
+        const clarified = await persistClarifiedParams(fresh, step.missing ?? [], rawMessage);
+        const freshMeta: any = { ...((fresh.metadata as any) ?? {}), plan: undefined };
+        if (Object.keys(clarified).length > 0) freshMeta.clarifiedParams = clarified;
+        await updateSession(io.databaseId, io.sessionId, "metadata", freshMeta);
+        if (Object.keys(clarified).length > 0) {
+          await updateSession(io.databaseId, io.sessionId, "parameters", fresh.parameters);
+        }
+        const combined = `${meta.lastRequest ?? rawMessage}\n${rawMessage.trim()}`;
+        console.log(`[vers_11] Clarification answered → re-composing: ${combined.slice(0, 120)}`);
+        await processUserMessage(combined, fresh, io);
+        return;
+      }
       const continued = await resumePlan({ plan: existingPlan, rawMessage, io });
       if (continued) {
         const reviewShaped = (existingPlan.provenance?.skills ?? []).includes("data-account-check");
@@ -159,9 +177,11 @@ export async function processUserMessage(
   });
 
   // ── Compose + execute the plan ────────────────────────────────────────────
+  await io.addMessage({ markdown: "> _Composing plan…_", json: { kind: "meta", phase: "compose" } });
   const plan = await composePlan({
     databaseId: io.databaseId,
     userId: io.userId,
+    sessionId: io.sessionId,
     rawMessage,
     mode: io.mode,
     selectedSkills,

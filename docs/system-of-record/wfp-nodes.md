@@ -10,11 +10,18 @@ The document has two halves: the **work product** (content) and the **record**
 | `metadata` | Identity and fiscal framing: workspace name, entity, period, format version, and (new) `engagement_id` / `team_id` references into the Identity shell |
 | `workflows[]` | The procedures — close, reconciliation, review — as repeatable steps |
 | `tools[]` | Tool definitions the workflows reference |
-| `data{}` | The books and working papers — named data entries |
-| `knowledge[]` | Reference packs the workflows and chat consult |
+| `data{}` | The books and working papers — named data entries || `knowledge[]` | Reference packs the workflows and chat consult |
 | `rules[]` | User-authored rules and guardrails |
 | `sessions[]` | The record of chat and automation runs |
 | `plan[]`, `todos[]`, `saved_prompts[]` | Working state: plans, task lists, saved prompts |
+
+### `data{}` source workbooks
+
+When an Excel workbook is uploaded, the whole original `.xlsx` is preserved as a
+single `source_<name>` entry (base64 in `content`, `content_type: "xlsx"`), so the
+raw file can be re-downloaded and re-opened. It is download-only — never parsed,
+normalized, catalogued, or exposed to the data tools. Downloaded via the data
+list's "Download" action (`GET /workspace/data/:name/download`).
 
 ## Record plane — the system-of-record layer
 

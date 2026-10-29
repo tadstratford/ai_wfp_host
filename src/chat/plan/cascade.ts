@@ -22,6 +22,7 @@
 import { askClassifier } from "@shared/typesafe/openRouter";
 import type { NoulAnswer, Question } from "@shared/typesafe/types";
 import { getClassifierKey } from "@backend/core/user/getLLMApiKey";
+import { logAndFireJev } from "../jevLog";
 import { z } from "zod";
 import { callStructured } from "@backend/core/llm/structured";
 import { getSessionByDatabaseId } from "@backend/core/workspace/workspaceSessionStore";
@@ -97,15 +98,19 @@ function referencesPrior(rawMessage: string): boolean {
   );
 }
 
-/** The workspace's loaded data files, name + columns. */
+/** The workspace's loaded data files, name + columns. Source workbooks
+ *  (`source_*`, content_type "xlsx") are excluded — download-only. */
 function dataInventory(databaseId: string): { name: string; columns: string[] }[] {
   try {
     const ws = getSessionByDatabaseId(databaseId);
     if (!ws) return [];
-    return ws.getDataNames().map((name: string) => {
-      const e = ws.getDataEntry(name);
-      return { name, columns: Array.isArray(e?.columns) ? (e.columns as string[]) : [] };
-    });
+    return ws
+      .getDataNames()
+      .filter((name) => ws.getDataEntry(name)?.content_type !== "xlsx")
+      .map((name: string) => {
+        const e = ws.getDataEntry(name);
+        return { name, columns: Array.isArray(e?.columns) ? (e.columns as string[]) : [] };
+      });
   } catch {
     return [];
   }
@@ -1143,7 +1148,20 @@ async function classify(
     };
   });
 
+  const t0 = Date.now();
   const { response } = await askClassifier(state, questions, { apiKey: key });
+  await logAndFireJev({
+    databaseId: req.databaseId,
+    sessionId: req.sessionId,
+    mode: req.mode,
+    phase: "plan-shape",
+    questions,
+    state,
+    answers: response.answers,
+    model: response.model,
+    usage: response.usage,
+    durationMs: Date.now() - t0,
+  });
   const noul = (name: string) => (response.answers[name] as NoulAnswer).noul >= N;
 
   const flags: Flags = {};

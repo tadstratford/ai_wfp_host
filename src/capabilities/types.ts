@@ -43,6 +43,9 @@ export interface CapabilityTool {
   durable?: boolean;
   /** Produces a self-contained downloadable report artifact. */
   report?: boolean;
+  /** The tool's result is display-ready markdown — the chat executor relays it
+   *  to the user when it is the final step of a turn. */
+  present?: boolean;
 }
 
 /** A full tool: its declaration plus its implementation. One per `tools/*.ts`. */

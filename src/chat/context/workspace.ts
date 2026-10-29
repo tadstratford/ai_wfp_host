@@ -41,11 +41,16 @@ export function ruleBriefLines(databaseId: string): string[] {
   );
 }
 
-/** Loaded data-file names (names only, so the classifier prompt stays lean). */
+/** Loaded data-file names (names only, so the classifier prompt stays lean).
+ *  Source workbooks (`source_*`, content_type "xlsx") are download-only and are
+ *  excluded so the model never routes/plans against a base64 blob. */
 export function dataFileNames(databaseId: string): string[] {
   try {
     const ws = getSessionByDatabaseId(databaseId);
-    return ws ? ws.getDataNames() : [];
+    if (!ws) return [];
+    return ws.getDataNames().filter(
+      (name) => ws.getDataEntry(name)?.content_type !== "xlsx",
+    );
   } catch {
     return [];
   }

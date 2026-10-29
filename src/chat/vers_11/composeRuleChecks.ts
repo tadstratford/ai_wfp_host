@@ -47,7 +47,10 @@ export async function composeRuleChecks(opts: {
 
   let dataNames: string[] = [];
   try {
-    dataNames = getSessionByDatabaseId(opts.databaseId)?.getDataNames() ?? [];
+    const ws = getSessionByDatabaseId(opts.databaseId);
+    dataNames = ws
+      ? ws.getDataNames().filter((n) => ws.getDataEntry(n)?.content_type !== "xlsx")
+      : [];
   } catch {
     dataNames = [];
   }

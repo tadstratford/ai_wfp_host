@@ -8,8 +8,8 @@ import {
 } from "@backend/core/workspace/workspaceSessionStore";
 import { openDiskWorkspace, WorkspaceOpenError } from "@backend/core/workspace/workspaceLifecycle";
 import {
-  listUserData,
   loadUserData,
+  loadSourceWorkbook,
   detectContentMeta,
   deleteUserData,
   getUserData,
@@ -238,6 +238,15 @@ export const userDataLoadHandler = async (c: Context) => {
       const arrayBuffer = await (file as File).arrayBuffer();
       const workbook = XLSX.read(Buffer.from(arrayBuffer), { type: "buffer" });
 
+      // Preserve the whole original workbook as ONE `source_<name>` entry.
+      await loadSourceWorkbook(
+        databaseId,
+        name,
+        Buffer.from(arrayBuffer).toString("base64"),
+        sourceFilename,
+        workbook.SheetNames.length,
+      );
+
       for (const sheetName of workbook.SheetNames) {
         const sanitizedSheet = sheetName.trim().toLowerCase().replace(/[^a-z0-9_]/g, "_");
         const entryName = `${name}_${sanitizedSheet}`;
@@ -332,14 +341,24 @@ export const userDataDownloadHandler = async (c: Context) => {
   if (!databaseId) return c.text("No active database", 400);
 
   const name = decodeURIComponent(c.req.param("name"));
-  const content = await getUserData(databaseId, name);
-  if (content === null) return c.text("Not found", 404);
+  const entry = getSessionByDatabaseId(databaseId)?.getDataEntry(name);
+  if (!entry) return c.text("Not found", 404);
 
-  // Try to use the original source filename, fall back to name.txt
-  const items = await listUserData(databaseId);
-  const item = items.find((i) => i.name === name);
-  const filename = item?.source_filename || `${name}.txt`;
+  // Source workbook (`source_<name>`, content_type "xlsx") → decoded .xlsx binary.
+  if (entry.content_type === "xlsx" && typeof entry.content === "string") {
+    const buf = Buffer.from(entry.content, "base64");
+    const filename = entry.source_filename || `${name}.xlsx`;
+    console.log(`[data-download] "${name}" type=xlsx bytes=${buf.length} filename="${filename}"`);
+    return new Response(new Uint8Array(buf), {
+      headers: {
+        "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "Content-Disposition": `attachment; filename="${filename}"`,
+      },
+    });
+  }
 
+  const content = typeof entry.content === "string" ? entry.content : "";
+  const filename = entry.source_filename || `${name}.txt`;
   c.header("Content-Type", "text/plain; charset=utf-8");
   c.header("Content-Disposition", `attachment; filename="${filename}"`);
   return c.body(content);

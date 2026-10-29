@@ -78,6 +78,8 @@ export interface ControlStep {
   kind: "control";
   control: "approval" | "clarify";
   prompt?: string;
+  /** Unresolved required args (`toolId.param`) when this is a clarify gate. */
+  missing?: string[];
   status: StepStatus;
 }
 

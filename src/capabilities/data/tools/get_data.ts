@@ -16,6 +16,15 @@ function readOne(
 ): Record<string, unknown> {
   const columnsFilter = columns?.length ? new Set(columns) : null;
 
+  if (entry.content_type === "xlsx") {
+    return {
+      name,
+      content_type: "xlsx",
+      note: "Source workbook (original .xlsx) — download-only, not tabular data.",
+      source_filename: entry.source_filename ?? null,
+    };
+  }
+
   if (entry.content_type === "json_cells") {
     const cellsRaw =
       entry.content_json && typeof entry.content_json === "object"
@@ -107,6 +116,7 @@ export default defineTool({
     "Reads a loaded data file in pages. For tabular data (csv/json_array) it returns a page of up to 500 rows (use offset to page forward, check has_more to know when to stop). For text/json_object files it returns the whole content. Pass `names` (an array) to read several files in one call — each is returned under `tables` (a page of up to 500 rows each), so a multi-sheet workbook can be loaded in a single round-trip instead of one call per sheet.",
   class: "read",
   output: { metaType: "json_object", tabular: true },
+  present: true,
   inputSchema: {
     name: z.string().optional().describe("Data file name (single read)."),
     names: z

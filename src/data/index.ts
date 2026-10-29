@@ -370,6 +370,28 @@ export async function loadUserData(
   refineDataCatalogWithJev(session).catch(() => {});
 }
 
+/** Store a whole uploaded workbook as a single `source_<name>` data entry. The
+ *  content is the raw `.xlsx` as base64, marked `xlsx` so the analysis pipeline
+ *  (normalize / mask / summarize / catalog) never touches it. Downloadable as the
+ *  original file via the data list's "Download" action. */
+export async function loadSourceWorkbook(
+  databaseId: string,
+  name: string,
+  base64: string,
+  sourceFilename: string,
+  sheetCount: number,
+): Promise<void> {
+  const session = requireSessionByDatabaseId(databaseId);
+  const entryName = `source_${name}`;
+  session.setDataEntry(entryName, {
+    content: base64,
+    content_type: "xlsx",
+    source_filename: sourceFilename,
+    row_count: sheetCount,
+    loaded_at: new Date().toISOString(),
+  });
+}
+
 export async function getUserData(
   databaseId: string,
   name: string,

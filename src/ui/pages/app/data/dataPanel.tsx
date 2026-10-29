@@ -102,12 +102,15 @@ export const dataPanelView = async (c: Context) => {
           {items.length > 0 && (
             <button
               hx-post="/app/clear-data"
-              hx-confirm="Clear all data?"
+              hx-confirm="Delete ALL data? This removes every loaded data object and cannot be undone."
               hx-swap="none"
               hx-on--after-request="htmx.ajax('GET', '/app/data/list', {target: '#data-file-list', swap: 'innerHTML'})"
-              class="text-xs text-coral-500 hover:text-coral-600 dark:text-coral-400 dark:hover:text-coral-300"
+              class="inline-flex items-center gap-1.5 rounded-xl border border-coral-200 bg-coral-50 px-3 py-1.5 text-xs font-semibold text-coral-600 hover:bg-coral-100 dark:border-coral-800 dark:bg-coral-900/30 dark:text-coral-300 dark:hover:bg-coral-900/50 transition-colors"
             >
-              Clear All
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6M10 11v6M14 11v6" />
+              </svg>
+              Delete All
             </button>
           )}
         </div>
@@ -246,6 +249,7 @@ export const DataFileList = ({ items }: { items: any[] }) => {
         const sizeKb = Math.round(item.size / 1024);
         const sizeLabel = sizeKb > 0 ? `${sizeKb} KB` : `${item.size} chars`;
         const timestamp = item.edited_at || item.loaded_at;
+        const isSource = item.content_type === "xlsx";
 
         return (
           <div
@@ -260,7 +264,7 @@ export const DataFileList = ({ items }: { items: any[] }) => {
                 <span class="text-xs text-ink-400 ml-2 uppercase">{item.content_type}</span>
               )}
               {item.row_count != null && (
-                <span class="text-xs text-ink-400 ml-1">{item.row_count} rows</span>
+                <span class="text-xs text-ink-400 ml-1">{item.row_count} {isSource ? "sheets" : "rows"}</span>
               )}
               <span class="text-xs text-ink-400 ml-1">({sizeLabel})</span>
               {timestamp && (
@@ -280,24 +284,28 @@ export const DataFileList = ({ items }: { items: any[] }) => {
               })()}
             </div>
             <div class="flex flex-wrap items-center gap-2">
-              <button
-                hx-get={`/app/data/edit/${encodeURIComponent(item.name)}`}
-                hx-target="#modal-container"
-                hx-swap="innerHTML"
-                hx-on--after-request="document.getElementById('modal-container').classList.remove('hidden')"
-                class="text-xs text-brand-600 dark:text-brand-300 hover:underline"
-              >
-                Edit
-              </button>
-              <label class="text-xs text-brand-600 dark:text-brand-300 hover:underline cursor-pointer">
-                Replace
-                <input
-                  type="file"
-                  accept=".csv,.txt,.json,.tsv,.xlsx,.xls"
-                  class="hidden"
-                  onchange={`replaceUserData(this, '${item.name.replace(/'/g, "\\'")}')`}
-                />
-              </label>
+              {!isSource && (
+                <button
+                  hx-get={`/app/data/edit/${encodeURIComponent(item.name)}`}
+                  hx-target="#modal-container"
+                  hx-swap="innerHTML"
+                  hx-on--after-request="document.getElementById('modal-container').classList.remove('hidden')"
+                  class="text-xs text-brand-600 dark:text-brand-300 hover:underline"
+                >
+                  Edit
+                </button>
+              )}
+              {!isSource && (
+                <label class="text-xs text-brand-600 dark:text-brand-300 hover:underline cursor-pointer">
+                  Replace
+                  <input
+                    type="file"
+                    accept=".csv,.txt,.json,.tsv,.xlsx,.xls"
+                    class="hidden"
+                    onchange={`replaceUserData(this, '${item.name.replace(/'/g, "\\'")}')`}
+                  />
+                </label>
+              )}
               <a
                 href={`/app/workspace/api/data/${encodeURIComponent(item.name)}/download`}
                 class="text-xs text-brand-600 dark:text-brand-300 hover:underline"

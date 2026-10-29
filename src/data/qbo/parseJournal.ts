@@ -7,6 +7,7 @@
 
 import type { QboJournal } from "wfp-format/qbo";
 import {
+  COLUMN_ALIASES,
   columnIndex,
   findHeaderRow,
   gridFromCells,
@@ -27,8 +28,9 @@ export function parseJournal(cells: CellMap, sourceFilename = ""): QboJournal {
   const cName = columnIndex(grid, headerRow, "name");
   const cMemo = columnIndex(grid, headerRow, "memo/description", "description", "memo");
   const cAccount = columnIndex(grid, headerRow, "split", "account");
-  const cDebit = columnIndex(grid, headerRow, "debit");
-  const cCredit = columnIndex(grid, headerRow, "credit");
+  const cDebit = columnIndex(grid, headerRow, ...COLUMN_ALIASES.debit);
+  const cCredit = columnIndex(grid, headerRow, ...COLUMN_ALIASES.credit);
+  const cAmount = columnIndex(grid, headerRow, ...COLUMN_ALIASES.amount);
 
   const headers = {
     date: [] as string[],
@@ -60,9 +62,24 @@ export function parseJournal(cells: CellMap, sourceFilename = ""): QboJournal {
   for (let r = headerRow + 1; r < grid.length; r++) {
     const row = grid[r] ?? [];
     const dateRaw = cell(row, cDate);
-    const debit = parseCellNumber(cDebit >= 0 ? cell(row, cDebit) : "");
-    const credit = parseCellNumber(cCredit >= 0 ? cell(row, cCredit) : "");
     const account = cell(row, cAccount);
+
+    // Debit/Credit layout, or a single signed Amount column (positive = debit,
+    // negative = credit) — mirroring the general-ledger parser, so a journal
+    // export that only carries an "Amount" column keeps its figures.
+    let debit: number;
+    let credit: number;
+    if (cDebit >= 0 && cCredit >= 0) {
+      debit = parseCellNumber(cell(row, cDebit));
+      credit = parseCellNumber(cell(row, cCredit));
+    } else if (cAmount >= 0) {
+      const v = parseCellNumber(cell(row, cAmount));
+      debit = v > 0 ? v : 0;
+      credit = v < 0 ? -v : 0;
+    } else {
+      debit = 0;
+      credit = 0;
+    }
 
     // A row with a date opens a new journal entry (header).
     if (isDateCell(dateRaw)) {
