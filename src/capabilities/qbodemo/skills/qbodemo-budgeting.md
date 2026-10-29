@@ -1,6 +1,7 @@
 ---
 name: qbodemo-budgeting
 description: Build and report on a budget-vs-actual plan against the DEMO QuickBooks company (Acme Fund Services — a fund administrator with three funds as classes). Use ONLY when the qbodemo capability is enabled; never use the live qbo_* tools.
+tools: [{"name":"qbodemo_accounts_list","role":"demo QBO account feed"},{"name":"qbodemo_actuals_flat","role":"monthly demo QBO actuals"},{"name":"qbodemo_balance_sheet","role":"demo QBO balance sheet rows"},{"name":"qbodemo_cash_balances","role":"flat month-end Operating Cash feed"},{"name":"plan_dim_upsert","role":"write the reporting-account dimension"},{"name":"plan_dim_get","role":"read the reporting-account dimension"},{"name":"plan_facts_upsert","role":"write fact rows"},{"name":"plan_facts_get","role":"read fact rows"},{"name":"plan_budget_load","role":"load an uploaded Excel/CSV budget"},{"name":"plan_actuals_load","role":"roll demo QBO actuals into line-level actuals"},{"name":"plan_variance","role":"budget-vs-actual rows as JSON"},{"name":"plan_blend","role":"build the latest estimate"},{"name":"plan_forecast","role":"deterministic cash forecast"},{"name":"report_plan_variance","role":"budget-vs-actual HTML report"},{"name":"report_plan_cash_forecast","role":"cash-forecast HTML report"},{"name":"chat_download","role":"deliver the finished HTML report"},{"name":"save_data","role":"carry data between steps"},{"name":"get_data","role":"carry data between steps"},{"name":"show_message","role":"present findings"}]
 ---
 
 ## Instructions
@@ -14,21 +15,6 @@ description: Build and report on a budget-vs-actual plan against the DEMO QuickB
 4. **Enter budget / forecast.** To load an uploaded Excel/CSV budget, call `plan_budget_load(source, version, fiscal_year)` — it maps each row's `Account` column to `account` and its Jan..Dec columns to `per_1..per_12`, then writes the version (e.g. `budget1`). For a hand-built forecast, use `plan_facts_upsert` with fact rows. For a cash forecast, call `qbodemo_cash_balances` (store_to) then `plan_forecast(fy, cutover_per, source)` — it deterministically writes the `Forecast` and `Latest estimate` versions.
 5. **Cash is a balance line, not a flow** — pull month-end bank balances from `qbodemo_cash_balances` (a flat `{ period, amount }` feed) and feed them to `plan_forecast`; it projects the remaining months and blends into "Latest estimate".
 6. **Report.** For a deliverable, render the variance deterministically with `report_plan_variance(fy, base, compare, ...)` → `chat_download(data="{{result}}", filename="budget-variance.html")`. For a quick inline summary only, `plan_variance` returns the same rows as JSON.
-
-## Tools needed
-- `qbodemo_accounts_list`, `qbodemo_actuals_flat`, `qbodemo_balance_sheet` — demo QBO account feed + monthly actuals + cash
-- `qbodemo_cash_balances` — flat month-end Operating Cash feed (feeds `plan_forecast`)
-- `plan_dim_upsert`, `plan_dim_get` — reporting-account dimension + mapping
-- `plan_facts_upsert`, `plan_facts_get` — write/read facts (all versions)
-- `plan_budget_load` — load an uploaded Excel/CSV budget into a version
-- `plan_actuals_load` — roll demo QBO actuals into line-level `actuals`
-- `plan_variance`, `plan_blend` — budget-vs-actual report + "Latest estimate"
-- `plan_forecast` — deterministic cash forecast (`Forecast` + `Latest estimate` versions)
-- `report_plan_variance` — deterministic budget-vs-actual HTML report (pair with `chat_download`)
-- `report_plan_cash_forecast` — deterministic cash-forecast HTML report (pair with `chat_download`)
-- `chat_download` — deliver the finished self-contained HTML report
-- `save_data`, `get_data` — carry data between steps
-- `show_message` — present findings to the user
 
 ## Rules
 - Use the `qbodemo_*` tools only — never the live `qbo_*` tools.

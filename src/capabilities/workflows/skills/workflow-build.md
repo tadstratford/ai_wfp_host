@@ -1,6 +1,7 @@
 ---
 name: workflow-build
 description: Detect a request to create or modify an automated workflow and direct the user to the Make Workflow / Modify Workflow tools (do not build in chat).
+tools: [{"name":"show_message","role":"present the link to the user"},{"name":"list_workflows","role":"identify the workflow"},{"name":"get_workflow","role":"identify the workflow"},{"name":"list_data","role":"confirm workspace state"}]
 ---
 
 ## Instructions
@@ -13,11 +14,6 @@ description: Detect a request to create or modify an automated workflow and dire
 
 3. For changes to an EXISTING workflow, direct the user to the Modify Workflow tool (`/app/modify-workflow/:workflowId`).
 4. Stop — do not call `create_workflow`, `add_node`, `update_workflow`, `update_node`, or any other creation/edit tool.
-
-## Tools needed
-- `show_message` — present the link to the user
-- `list_workflows`, `get_workflow` — optionally identify the workflow before replying
-- `list_data` — optionally confirm the workspace state before replying
 
 ## Rules
 - Never create or modify workflows, tools, or nodes in chat — direct users to the Make Workflow / Modify Workflow tools.

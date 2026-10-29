@@ -10,12 +10,12 @@
  *   6. rule-report marker (communication, resolved by the executor)
  */
 
-import { getPlanner } from "../plan/planner";
-import type { PlanRequest, PlanResult } from "../plan/planner";
+import { getPlanner } from "./plan/planner";
+import type { PlanRequest, PlanResult } from "./plan/planner";
 import { isDurableTool, isMutatingTool, listCapabilities } from "../../capabilities/registry";
 import { enabledSkillNamesForDatabase } from "../../core/skills/loader";
 import { getCapabilityIndex } from "@mcp/capabilityIndex";
-import { COMPOSABLE_PRIMITIVES } from "../plan/primitives";
+import { COMPOSABLE_PRIMITIVES } from "./plan/primitives";
 import { withTimeout } from "./util";
 import { composeRuleChecks } from "./composeRuleChecks";
 import type { ClassifiedRule, DataStep, Step, TurnPlan } from "./types";
@@ -36,18 +36,30 @@ function disabledToolNames(databaseId: string): Set<string> {
 async function buildToolRoster(
   databaseId: string,
   selectedSkills: string[],
-): Promise<{ name: string; description: string }[]> {
+  selectedRules: ClassifiedRule[],
+): Promise<{ roster: { name: string; description: string }[]; disabledRuleTools: string[] }> {
   const capability = await getCapabilityIndex();
   const disabled = disabledToolNames(databaseId);
-  // Tools follow skills: the planner sees the routed skills' declared tools plus
-  // the composable primitives — not the full capability surface (which would
-  // dilute a one-shot LLM plan and widen the hallucination surface).
+  // Tools follow skills AND rules: the planner sees the routed skills' declared
+  // tools plus the selected rules' `## Tools needed` plus the composable
+  // primitives — not the full capability surface (which would dilute a one-shot
+  // LLM plan and widen the hallucination surface).
   const declared = new Set<string>();
   for (const skill of selectedSkills) {
     const entry = capability.skills.get(skill);
     if (entry) for (const t of entry.tools) declared.add(t);
   }
-  return [...capability.tools.values()]
+  // A rule that names tools its method needs — surfaced even when the skill that
+  // owns those tools wasn't routed. A disabled-capability tool is flagged so the
+  // user gets an actionable error instead of a silently-empty plan.
+  const disabledRuleTools: string[] = [];
+  for (const cr of selectedRules) {
+    for (const t of cr.rule.tools ?? []) {
+      declared.add(t.name);
+      if (disabled.has(t.name) && !disabledRuleTools.includes(t.name)) disabledRuleTools.push(t.name);
+    }
+  }
+  const roster = [...capability.tools.values()]
     .filter(
       (t) =>
         !ROUTING_TOOLS.has(t.name) &&
@@ -55,6 +67,7 @@ async function buildToolRoster(
         (declared.has(t.name) || COMPOSABLE_PRIMITIVES.includes(t.name)),
     )
     .map((t) => ({ name: t.name, description: t.description }));
+  return { roster, disabledRuleTools };
 }
 
 export interface ComposeInput {
@@ -72,7 +85,17 @@ export interface ComposeInput {
 }
 
 export async function composePlan(input: ComposeInput): Promise<TurnPlan> {
-  const roster = await buildToolRoster(input.databaseId, input.selectedSkills);
+  const { roster, disabledRuleTools } = await buildToolRoster(
+    input.databaseId,
+    input.selectedSkills,
+    input.selectedRules,
+  );
+
+  // The selected rules' full markdown, injected so the planner can follow the
+  // client's method exactly (accounts, month, tool calls).
+  const guidance = input.selectedRules.length > 0
+    ? input.selectedRules.map((r) => `## Rule: ${r.rule.name}\n${r.rule.content}`).join("\n\n")
+    : undefined;
 
   const planRequest: PlanRequest = {
     databaseId: input.databaseId,
@@ -85,6 +108,7 @@ export async function composePlan(input: ComposeInput): Promise<TurnPlan> {
     complexity: input.complexity,
     mutating: input.mutating,
     clarifiedParams: input.clarifiedParams,
+    guidance,
   };
 
   // cascade → llm. No free-form loop: every request is a plan. Planner calls are
@@ -161,6 +185,45 @@ export async function composePlan(input: ComposeInput): Promise<TurnPlan> {
   // Assemble: data steps, with rule checks and the approval gate injected at the
   // write boundary (rule checks run BEFORE the gate).
   const assembled: Step[] = [];
+
+  // A rule that names a disabled-capability tool is surfaced up front — the
+  // plan would otherwise silently omit the work the client asked for.
+  if (disabledRuleTools.length > 0) {
+    assembled.push({
+      kind: "communication",
+      message: {
+        markdown:
+          `⚠ This request's rules need tools from a disabled capability: ${disabledRuleTools.map((t) => `\`${t}\``).join(", ")}. ` +
+          `Enable the capability and try again.`,
+      },
+      status: "pending",
+    });
+  }
+
+  // A method rule whose declared `## Tools needed` are missing from the plan is
+  // surfaced fail-closed: the plan would otherwise silently omit work the client
+  // asked for. (Disabled capabilities are surfaced separately above.)
+  const plannedTools = new Set(dataSteps.map((s) => s.tool));
+  const missingRuleTools: string[] = [];
+  for (const r of input.selectedRules) {
+    for (const t of r.rule.tools ?? []) {
+      if (!plannedTools.has(t.name) && !disabledRuleTools.includes(t.name)) {
+        missingRuleTools.push(`\`${r.rule.name}\` needs \`${t.name}\``);
+      }
+    }
+  }
+  if (missingRuleTools.length > 0) {
+    assembled.push({
+      kind: "control",
+      control: "clarify",
+      prompt:
+        "I can't run this request because the plan is missing tool(s) the activated rules require:\n" +
+        missingRuleTools.map((s) => `- ${s}`).join("\n") +
+        "\n\nAdd the tool to the plan or enable the capability, then try again.",
+      status: "pending",
+    });
+  }
+
   if (mutatingRequest) {
     assembled.push(...dataSteps.slice(0, writeIdx));
     assembled.push(...ruleSteps);

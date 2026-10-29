@@ -230,17 +230,20 @@ Everything tunable is a knob, not an `if` in harness code.
 src/chat/vers_11/
   index.ts              ingest: session load, dedupe, banner, log hook, scopes
   orchestrator.ts       processUserMessage — the loop (resume → route → rules → compose → execute)
+  config.ts             the server-global knob surface (loadConfig)
   types.ts              TurnPlan + Step union + SelectedRule/ClassifiedRule/RuleTier
+  ruleParse.ts          parse a rule's ## Instructions / ## Tools needed / ## Rules
   composePlan.ts        assemble the TurnPlan (planner steps + rule checks + gate + delivery tail)
-  executePlan.ts        walk the plan, run tools, interpret rule-check flags, present results
+  executePlan.ts        walk the plan, run tools, interpret rule-check flags, present + verify results
   resume.ts             resolve a paused control step
+  review.ts             deterministic review report + reconcile (buildReview/renderReviewReport/reconcileReviewEvidence)
   verify.ts             LLM result verification (satisfies/complete/accurate/thorough + issues)
   select.ts             rule-selection funnel (Jev)
-  classifyRule.ts       rule tier classification (→ Jev over skill/rule metadata)
+  classifyRule.ts       rule tier classification (## Rules + capability-tool audit guard)
   composeRuleChecks.ts  LLM-composed rule→check steps
   skillRouter.ts        route() — skill selection (Jev)
   getSkillsPrompt.ts    system skill names for routing
-  util.ts               withTimeout etc.
+  util.ts               withTimeout + isApproval
   plan/                 the planner layer (moved in from src/chat/plan/)
     planner.ts          getPlanner registry
     cascade.ts          shape registry + Jev plan-shape classification
@@ -259,9 +262,9 @@ Each is a concrete blocker to "self-contained" and has a specific resolution.
 
 | # | Constraint | What it is | Action |
 |---|---|---|---|
-| 1 | `route` lives in `vers_8/skillRouter.ts` | skill selection is imported across versions | fold `skillRouter.ts` + `getSkillsPrompt.ts` into `vers_11/`; then **remove `src/chat/vers_8/`**. |
-| 2 | `OrchestratorIO`, `isApproval`, `buildReview`, `renderReviewReport`, `reconcileReviewEvidence` live in `vers_9/orchestrator.ts` | the IO type, approval parser, and review-report renderer are imported from a version that will be deleted | extract `OrchestratorIO` + `isApproval` into `vers_11/types.ts`/`util.ts`; move `buildReview`/`renderReviewReport`/`reconcileReviewEvidence` into `vers_11/review.ts` (or a non-version shared module); then **remove `src/chat/vers_9/`**. |
-| 3 | The planner layer lives in `src/chat/plan/` (shared, pre-version) | `planner`, `cascade`, `llm`, `primitives`, `outputs`, `clarify`, `types` are outside vers_11 | move into `vers_11/plan/` (and delete `src/chat/plan/` once nothing else references it). |
+| 1 | `route` lives in `vers_8/skillRouter.ts` | skill selection is imported across versions | **done** — folded `skillRouter.ts` + `getSkillsPrompt.ts` into `vers_11/`. Remaining: **remove `src/chat/vers_8/`**. |
+| 2 | `OrchestratorIO`, `isApproval`, `buildReview`, `renderReviewReport`, `reconcileReviewEvidence` live in `vers_9/orchestrator.ts` | the IO type, approval parser, and review-report renderer are imported from a version that will be deleted | **done** — `OrchestratorIO` → `types.ts`, `isApproval` → `util.ts`, review helpers → `review.ts`. Remaining: **remove `src/chat/vers_9/`**. |
+| 3 | The planner layer lives in `src/chat/plan/` (shared, pre-version) | `planner`, `cascade`, `llm`, `primitives`, `outputs`, `clarify`, `types` are outside vers_11 | **done** — copied into `vers_11/plan/` (relative imports fixed). Remaining: **delete `src/chat/plan/`** once nothing else references it. |
 | 4 | `src/chat/index.ts` is a version barrel (`ORCHESTRATOR` selects v8/v9/v10/v11) | the entry point dispatches across versions | collapse `index.ts` to export only vers_11's `handleMessage`; keep `ORCHESTRATOR` as a no-op alias if needed for migration. |
 | 5 | `src/chat/README.md` documents four orchestrators | top-level chat README describes all versions | rewrite as vers_11-only (or fold into this doc). |
 | 6 | Storytelling still references `vers_10` orchestration | `docs/data-storytelling.md` cites `vers_10/orchestrator.ts` | rewrite the doc to express beats as `communication` steps from a skill; **remove `src/chat/vers_10/`**. |
@@ -271,14 +274,26 @@ Each is a concrete blocker to "self-contained" and has a specific resolution.
 
 ## 10. Build sequence (current → stable)
 
-- [ ] **Self-contain** — fold `skillRouter` + planner layer into `vers_11/`; extract
-      `OrchestratorIO`/`isApproval`/review helpers out of `vers_9`; collapse `src/chat/index.ts`.
-- [ ] **LLM verification** — implement `verify.ts` (LLM) + wire into `executePlan` with a
-      `shouldVerify` scope predicate + `pendingVerify` persistence.
-- [ ] **De-regex** — replace `classifyRule` keyword map and follow-up/references-prior
-      matchers with Jev/LLM (or skill metadata).
-- [ ] **Config surface** — hoist loops/gates/engine-mix/thresholds into env/workspace
-      config; expose the five switchable stages (§4).
+- [x] **Self-contain (code)** — folded `skillRouter` + `getSkillsPrompt` into
+      `vers_11/`; extracted `OrchestratorIO`/`isApproval`/review helpers out of
+      `vers_9`; copied the planner layer into `vers_11/plan/`.
+- [ ] **Self-contain (entry point)** — collapse `src/chat/index.ts` to vers_11
+      only; then remove `vers_5`/`vers_8`/`vers_9`/`vers_10` and `src/chat/plan/`.
+- [x] **LLM verification** — `verify.ts` (LLM) + `shouldVerify` scope predicate +
+      `verdictPasses` gates; wired into `executePlan` with `pendingVerify` persistence.
+- [x] **Config surface** — `config.ts` holds every lever (temperature, engine mix,
+      escalation ceiling, thresholds, loop bounds, budget, verify gates, context caps);
+      skillRouter/select/executePlan/llm/cascade/composeRuleChecks read it.
+- [x] **De-regex (classifyRule)** — `classifyRule` now classifies the `## Rules`
+      section and guards capability-tool (method) rules to `audit` instead of a wrong
+      data tool; `ruleParse.ts` splits instructions/tools/rules.
+- [x] **Rules feed the planner** — `buildToolRoster` unions rules' `## Tools needed`;
+      selected rules' markdown is injected as `PlanRequest.guidance`; a rule naming a
+      disabled-capability tool surfaces an actionable error.
+- [x] **Rule-check dedupe** — `composeRuleChecks` emits one "not proven" per rule.
+- [x] **Compute ladder** — `resolveMethod` (tool → spec → judgment → gap) per
+      instruction, config-gated by `escalation.ceiling`/`gapDefault`; a blocked gap
+      surfaces as a fail-closed `clarify` step in `composePlan`.
 - [ ] **Plan revision + context cleaning** — resume-or-revise instead of discard; prune
       completed steps; cap history.
 - [ ] **Feedback buttons re-enter the loop** — `not_satisfied` → re-compose with the gap.
@@ -286,16 +301,20 @@ Each is a concrete blocker to "self-contained" and has a specific resolution.
       or `report_table → chat_download` (report).
 - [ ] **Storytelling via skills/tools** — beats as `communication` steps; remove any
       harness story logic.
-- [ ] **Delete removed versions** — execute the §9 actions (remove vers_6/8/9/10).
+- [ ] **Rule-builder tool validation** — `create_rule`/`update_rule` + rule wizard
+      validate `## Tools needed` (tool exists + capability enabled) and warn.
+- [ ] **Delete removed versions** — execute the §9 actions (remove vers_5/8/9/10).
 
 ---
 
 ## 11. Status
 
-**In progress.** Shipped: typed plan model, rule funnel, tier classification (regex),
-rule-check composition, compose/execute/resume, present-results, right-panel plan +
-review report. Open: self-containment (§9), LLM verification, de-regex, config surface,
-plan revision + feedback buttons, delivery tail, storytelling, and removal of other versions.
+**In progress.** Shipped: typed plan model, rule funnel, rule parsing (instructions/
+tools/rules), tier classification (## Rules + capability-tool audit guard), rule-check
+composition (deduped), compose/execute/resume, present-results, right-panel plan +
+review report, LLM verification, and the config surface. Open: compute ladder
+(`resolveMethod`), plan revision + feedback buttons, delivery tail, storytelling,
+rule-builder validation, and removal of other versions.
 
 Related: `docs/architecture.md`, `docs/system-of-record/plan.md` §9,
 `docs/data-storytelling.md`.

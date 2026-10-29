@@ -1,6 +1,7 @@
 ---
 name: qbo-journaling
 description: Post NEW journal entries to QuickBooks Online (balanced debit/credit entries, class/location allocations, reclassifications). Activate ONLY when the user asks to create, post, allocate, or reclassify a journal entry — never for P&L, balance sheet, reports, or analysis (use qbo-analysis for those).
+tools: [{"name":"qbo_accounts_list","role":"account discovery"},{"name":"qbo_classes_list","role":"resolve class names to Ids"},{"name":"qbo_locations_list","role":"resolve location names to Ids"},{"name":"qbo_vendors_list","role":"resolve vendor names to Ids"},{"name":"qbo_customers_list","role":"resolve customer names to Ids"},{"name":"qbo_bills_list","role":"find the source transaction amount and vendor"},{"name":"qbo_invoices_list","role":"find the source transaction amount and customer"},{"name":"qbo_allocation_compute","role":"deterministic table-driven split to balanced lines"},{"name":"get_data","role":"read the allocation table and interim table"},{"name":"list_data","role":"list available data"},{"name":"qbo_journal_create","role":"post the journal entry"},{"name":"qbo_journal_entries","role":"verify the posted entry"},{"name":"set_param","role":"store the entry details"},{"name":"get_param","role":"retrieve the entry details"},{"name":"show_message","role":"confirm the post and report the entry Id"}]
 ---
 
 ## When to use
@@ -29,18 +30,6 @@ When the user asks to allocate an existing transaction (e.g., a bill, invoice, o
 4. Attach the vendor (by name) to the source credit line when reclassifying an Accounts Payable bill.
 
 When the allocation is driven by a table (an allocation table of entity × month → % plus a set of amounts to allocate), do NOT compute the split yourself — call `qbo_allocation_compute` with the allocation table, the amounts, the period, the debit account, and the credit account. It computes the balanced lines deterministically (residual to the largest share) and writes them to an interim table (`staging_allocation_lines`). Read that table back with `get_data`, preview it with `show_message`, and post it with `qbo_journal_create` using `lines_source` = `staging_allocation_lines`.
-
-## Tools needed
-- `qbo_accounts_list` — account discovery
-- `qbo_classes_list`, `qbo_locations_list` — resolve class/location names to Ids for allocations
-- `qbo_vendors_list`, `qbo_customers_list` — resolve vendor/customer names to Ids
-- `qbo_bills_list`, `qbo_invoices_list` — find the source transaction's actual amount and vendor/customer
-- `qbo_allocation_compute` — deterministic table-driven split → balanced lines → interim table
-- `get_data`, `list_data` — read the allocation table, amounts, and the computed interim table
-- `qbo_journal_create` — post the journal entry
-- `qbo_journal_entries` — verify the posted entry
-- `set_param`, `get_param` — store and retrieve the entry details
-- `show_message` — confirm the post and report the entry Id
 
 ## Rules
 - Journal entries must balance: total debits equal total credits within $0.01.

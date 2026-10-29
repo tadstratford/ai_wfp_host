@@ -1,0 +1,1203 @@
+/**
+ * cascade planner — a shape registry. Jev classifies the request's *shape*
+ * (one fan-out of narrow nouls, derived from the registry below) and picks the
+ * data file; deterministic code assembles each shape's template; a single
+ * scoped LLM call fills only the free-text args (group_by, judge instructions,
+ * report title). Jev never generates the plan — it only gates its shape.
+ *
+ * Shapes are declarative: each entry declares the nouls that classify it, a
+ * matcher that decides whether it owns the request, and a builder that emits
+ * the plan. The classifier fan-out and the dispatch loop are both derived from
+ * this table, so adding a shape = adding one entry (no if/else chains, no
+ * classifier edits). Shapes that can't be templated yet simply don't match and
+ * the orchestrator falls back to the LLM planner / build loop.
+ *
+ * External (non-internal) MCP servers are not present today, but the registry
+ * is the extension point for them: a runtime connection can `registerShape()`
+ * a `ShapeDef` whose `build` emits a plan over that server's tools (typically
+ * LLM-assembled) — the same classify → match → build → validate pipeline
+ * applies without code changes elsewhere.
+ */
+
+import { askClassifier } from "@shared/typesafe/openRouter";
+import type { NoulAnswer, Question } from "@shared/typesafe/types";
+import { getClassifierKey } from "@backend/core/user/getLLMApiKey";
+import { logAndFireJev } from "../../jevLog";
+import { z } from "zod";
+import { callStructured } from "@backend/core/llm/structured";
+import { getSessionByDatabaseId } from "@backend/core/workspace/workspaceSessionStore";
+import { listCapabilities } from "@capabilities/registry";
+import { enabledSkillNamesForDatabase } from "@core/skills/loader";
+import { loadPrivacyMap } from "@backend/core/knowledge/index";
+import { maskText, discoverRequestValues } from "@backend/core/knowledge/autoMask";
+import { loadRules } from "@rules/loader";
+import { ruleBriefLines } from "../../context/workspace";
+import { FilterClauseSchema, type FilterClause } from "@data/filter";
+import { resolveDataNames } from "./args";
+import { getToolParams } from "../../extract/schema";
+import { extractParams } from "../../extract/extract";
+import type { NodePlan, PlanStep } from "./types";
+import type { Planner, PlanRequest, PlanResult } from "./planner";
+import { loadConfig } from "../config";
+
+/** Classifier noul answers, keyed by noul id. */
+type Flags = Record<string, boolean>;
+
+/** Per-request context shared across shapes (currently the data-file pick). */
+interface ShapeContext {
+  dataFiles: string[];
+}
+
+/** A declarative shape: how to classify it, when it owns the request, and how
+ *  to build its plan. */
+interface ShapeDef {
+  id: string;
+  /** Dispatch order — higher priority wins when multiple shapes match. */
+  priority: number;
+  /** Classification fan-out: noul id → instructions. */
+  nouls: Record<string, string>;
+  /** True when this shape owns the request, given all classified flags. */
+  matches: (flags: Flags) => boolean;
+  /** Assemble the plan (or return `fallback`). */
+  build: (req: PlanRequest, flags: Flags, ctx: ShapeContext) => Promise<PlanResult>;
+}
+
+interface AnalysisArgs {
+  group_by?: string[];
+  measures?: { column: string; fn: string }[];
+  checks?: { id: string; question: string }[];
+  title?: string;
+  detail_columns?: string[];
+}
+
+const AnalysisArgsSchema = z.object({
+  group_by: z.array(z.string()).optional(),
+  measures: z.array(z.object({ column: z.string(), fn: z.string() })).optional(),
+  checks: z.array(z.object({ id: z.string(), question: z.string() })).optional(),
+  title: z.string().optional(),
+  detail_columns: z.array(z.string()).optional(),
+});
+
+const N = 0.5; // noul → boolean threshold
+
+/** True when the request back-references the prior turn's result. */
+function referencesPrior(rawMessage: string): boolean {
+  const t = rawMessage.toLowerCase();
+  // Back-reference nouns — clearly about the prior turn's result.
+  if (
+    /\b(the (findings|results|analysis|summary|report|issues)|these (findings|results|issues)|those (findings|results|issues))\b/.test(
+      t,
+    )
+  ) {
+    return true;
+  }
+  // Demonstratives referring to the prior output ("put this into…", "it"),
+  // unless time-scoped ("this year", "this month" — a fresh scope, not a follow-up).
+  return (
+    /\b(this|that|these|those|it)\b/.test(t) &&
+    !/\b(this|that)\s+(year|month|quarter|week|day|period|fiscal|ytd)\b/.test(t)
+  );
+}
+
+/** The workspace's loaded data files, name + columns. Source workbooks
+ *  (`source_*`, content_type "xlsx") are excluded — download-only. */
+function dataInventory(databaseId: string): { name: string; columns: string[] }[] {
+  try {
+    const ws = getSessionByDatabaseId(databaseId);
+    if (!ws) return [];
+    return ws
+      .getDataNames()
+      .filter((name) => ws.getDataEntry(name)?.content_type !== "xlsx")
+      .map((name: string) => {
+        const e = ws.getDataEntry(name);
+        return { name, columns: Array.isArray(e?.columns) ? (e.columns as string[]) : [] };
+      });
+  } catch {
+    return [];
+  }
+}
+
+/** One scoped LLM call fills only the free-text analysis args. */
+async function llmFillAnalysisArgs(
+  req: PlanRequest,
+  source: string,
+  columns: string[],
+  flags: Flags,
+  filter?: FilterClause[],
+): Promise<AnalysisArgs> {
+  const wanted: string[] = [];
+  if (flags.aggregate || flags.report) wanted.push("group_by", "measures");
+  if (flags.judge) wanted.push("checks");
+  if (flags.report) wanted.push("title", "detail_columns");
+
+  const system =
+    "You fill the arguments for a deterministic data-analysis pipeline as a single JSON object. " +
+    "Return ONLY JSON. Use only the request and the column list — do not invent values or columns. " +
+    'Where requested: "group_by" is an array of categorical column names to group by, "measures" is an ' +
+    'array of {column, fn} with fn one of "sum"/"count"/"avg"/"min"/"max" over numeric columns, ' +
+    '"checks" is an array of {id, question} with 3-5 broad yes/no questions about the DATASET as a whole ' +
+    '(e.g. {id:"missing_gl_account", question:"Are any rows missing a GL Account?"}) — not per-row questions, ' +
+    '"title" is a short report title (name THIS data file, not the whole request), and ' +
+    '"detail_columns" is an array of columns to show in the drill-down.';
+
+  const user =
+    `User request: ${req.rawMessage}\n` +
+    `Data file: ${source}\n` +
+    `Columns: ${columns.join(", ")}\n\n` +
+    `Return a JSON object with these keys (omit any that do not apply): ${wanted.join(", ")}.`;
+
+  const res = await callStructured({
+    databaseId: req.databaseId,
+    schema: AnalysisArgsSchema,
+    toolName: "emit_analysis_args",
+    toolDescription: "Emit the analysis arguments as a JSON object matching the schema.",
+    system,
+    userMessage: user,
+    maxTokens: 1500,
+    temperature: loadConfig().llm.temperature,
+    callOpts: { userId: req.userId, mode: "chat", phase: "plan-args" },
+  });
+
+  const args: AnalysisArgs = res ?? {};
+
+  // A column the filter already pins to a single value (eq / in) is degenerate
+  // as a group-by — every row shares it. Drop it so the report isn't one group.
+  const pinned = new Set(
+    (filter ?? []).filter((c) => c.op === "eq" || c.op === "in").map((c) => c.column),
+  );
+  if (args.group_by && args.group_by.some((g) => pinned.has(g))) {
+    args.group_by = args.group_by.filter((g) => !pinned.has(g));
+  }
+
+  return args;
+}
+
+/** Structured output for rule→predicate resolution. */
+const RulePredicateSchema = z.object({
+  matched: z.boolean(),
+  rule_name: z.string().optional(),
+  statement: z.string().optional(),
+  predicate: z.array(FilterClauseSchema).optional(),
+});
+
+/** True when the request references a workspace rule, by the word "rule" or a
+ *  rule's own name/tags (so "apply the X policy" also resolves). */
+function referencesRule(raw: string, rules: { name: string; tags?: string[] }[]): boolean {
+  if (/\brule(s)?\b/i.test(raw)) return true;
+  const t = raw.toLowerCase();
+  return rules.some((r) => {
+    const names = [r.name, ...(r.tags ?? [])].map((n) => n.toLowerCase()).filter((n) => n.length >= 3);
+    return names.some((n) => t.includes(n));
+  });
+}
+
+/** One scoped LLM call resolves a referenced workspace rule into a deterministic
+ *  filter predicate (grounded in the real columns) + a plain-language statement
+ *  for the report's provenance band. Fail-closed: returns null when the model
+ *  can't produce a schema-conforming result (the caller then asks the user). */
+async function resolveRulePredicate(
+  req: PlanRequest,
+  rules: { name: string; description?: string; content: string }[],
+  columns: string[],
+): Promise<{
+  matched: boolean;
+  rule_name?: string;
+  statement?: string;
+  predicate?: FilterClause[];
+} | null> {
+  const system =
+    "You resolve a workspace rule into a deterministic row-filter predicate and a plain-language statement. " +
+    "Return ONLY the structured JSON via the forced tool. " +
+    '"predicate" is an array of {column, op, value} clauses that, ANDed together, keep exactly the rows the rule describes. ' +
+    'op is one of: eq, ne, gt, gte, lt, lte, contains, not_contains, in, is_empty, not_empty. ' +
+    "Use ONLY column names from the provided column list — never invent a column. " +
+    'Use concrete literal values: ISO dates ("2026-10-22") for dates, plain numbers without commas for numbers. ' +
+    '"in" takes a comma-separated list of values. ' +
+    'If the referenced rule is not in the provided rule list, or cannot be expressed as column filters, set "matched" to false. ' +
+    '"statement" is one sentence restating the rule for the report provenance.';
+
+  const ruleList = rules.length
+    ? rules.map((r) => `- ${r.name}: ${r.content.slice(0, 600)}`).join("\n")
+    : "(none)";
+
+  const user =
+    `User request: ${req.rawMessage}\n\n` +
+    `Workspace rules:\n${ruleList}\n\n` +
+    `Data columns: ${columns.join(", ")}\n\n` +
+    `Return a JSON object with keys: matched, rule_name, statement, predicate.`;
+
+  return await callStructured({
+    databaseId: req.databaseId,
+    schema: RulePredicateSchema,
+    toolName: "emit_rule_predicate",
+    toolDescription: "Emit the resolved rule predicate as structured JSON.",
+    system,
+    userMessage: user,
+    maxTokens: 1500,
+    temperature: loadConfig().llm.temperature,
+    callOpts: { userId: req.userId, mode: "chat", phase: "plan-rule" },
+  });
+}
+
+/** Deterministic required-arg check for a single step. */
+async function stepMissing(
+  toolId: string,
+  params: Record<string, unknown>,
+): Promise<string[]> {
+  const toolParams = await getToolParams(toolId);
+  return toolParams
+    .filter((p) => p.required && params[p.name] === undefined)
+    .map((p) => p.name);
+}
+
+/** Classify a QBO statement request as P&L vs Balance Sheet (deterministic). */
+function qboStatementType(raw: string): "pnl" | "balance_sheet" | null {
+  const t = raw.toLowerCase();
+  if (/\b(p&l|pnl|profit\s*&?\s*loss|income\s*statement|income\s+by)\b/.test(t)) {
+    return "pnl";
+  }
+  if (/\b(balance\s*sheet|statement\s+of\s+financial\s+position)\b/.test(t)) {
+    return "balance_sheet";
+  }
+  return null;
+}
+
+/** True when the request asks to save the result into durable workspace data. */
+function wantsSaveToData(raw: string): boolean {
+  const t = raw.toLowerCase();
+  return /\bsave\b/.test(t) && /\b(data|workspace|persist|store)\b/.test(t);
+}
+
+/** Map a QBO targeted-read request to its read tool id (deterministic). */
+function qboReadTool(raw: string): string | null {
+  const t = raw.toLowerCase();
+  const rules: [RegExp, string][] = [
+    [/\b(gl review|general ledger|misclassif|trial balance)\b/, "qbo_gl_review"],
+    [/\b(receivab|payab|aging|unpaid)\b/, "qbo_ar_ap"],
+    [/\bduplicat\b/, "qbo_duplicates"],
+    [/\brecurring\b/, "qbo_recurring_check"],
+    [/\buncategoriz\b/, "qbo_uncategorized"],
+    [/\bchart\s+of\s+accounts\b/, "qbo_accounts_list"],
+    [/\bcustomers?\b/, "qbo_customers_list"],
+    [/\bvendors?\b/, "qbo_vendors_list"],
+    [/\binvoices?\b/, "qbo_invoices_list"],
+    [/\bbills?\b/, "qbo_bills_list"],
+    [/\bclasses?\b/, "qbo_classes_list"],
+    [/\b(locations?|departments?)\b/, "qbo_locations_list"],
+    [/\baccounts?\b/, "qbo_accounts_list"],
+  ];
+  for (const [re, tool] of rules) {
+    if (re.test(t)) return tool;
+  }
+  return null;
+}
+
+/** Default comparison version for a budget-vs-actual request. */
+function planningCompareVersion(raw: string): string {
+  const t = raw.toLowerCase();
+  if (/\bforecast\b/.test(t)) return "Forecast";
+  if (/\blatest\s+estimate\b/.test(t)) return "Latest estimate";
+  if (/\bbudget\s*2\b/.test(t)) return "budget2";
+  return "budget1";
+}
+
+const FORECAST_MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
+
+/** Deterministic cutover month from the request text ("through September",
+ *  "after May", "as of Q3"…) — null when the request doesn't name one. */
+function cutoverFromText(raw: string): number | null {
+  const t = raw.toLowerCase();
+  const m = t.match(/(?:through|after|as\s+of|up\s+to|since)\s+([a-z]+)/);
+  if (m) {
+    const name = m[1];
+    for (let i = 0; i < 12; i++) {
+      if (FORECAST_MONTHS[i].startsWith(name) || FORECAST_MONTHS[i].slice(0, 3) === name) {
+        return i + 1;
+      }
+    }
+  }
+  const p = t.match(/(?:through|after|as\s+of|up\s+to|since)\s+(?:month|period|p)?\s*(\d{1,2})/);
+  if (p) {
+    const n = Number(p[1]);
+    if (n >= 1 && n <= 12) return n;
+  }
+  return null;
+}
+
+/** Default cutover for "the rest of the year": the current calendar month,
+ *  clamped to the fiscal year (end of year once we're past it). */
+function defaultCutoverFor(fy: number): number {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = now.getMonth() + 1;
+  if (y > fy) return 12;
+  if (y < fy) return 0;
+  return Math.min(m, 12);
+}
+
+/** The enabled cash-balance feed tool for this workspace — capability-driven so
+ *  it works regardless of which skill Jev routed (budgeting vs qbodemo-budgeting). */
+function cashFeedTool(databaseId: string): string | null {
+  const enabledSkills = enabledSkillNamesForDatabase(databaseId);
+  for (const cap of listCapabilities()) {
+    const m = cap.manifest;
+    const enabled = !m.group || (m.skills ?? []).some((s) => enabledSkills.has(s));
+    if (!enabled) continue;
+    const names = new Set(cap.tools.map((t) => t.name));
+    if (names.has("qbodemo_cash_balances")) return "qbodemo_cash_balances";
+    if (names.has("qbo_cash_balances")) return "qbo_cash_balances";
+  }
+  return null;
+}
+
+/** QBO statement → report_qbo_pnl / report_qbo_bs → chat_download. */
+async function qboStatementPlan(
+  req: PlanRequest,
+  stmt: "pnl" | "balance_sheet",
+): Promise<PlanResult> {
+  const toolId = stmt === "pnl" ? "report_qbo_pnl" : "report_qbo_bs";
+  const params = await getToolParams(toolId);
+  const { values } = extractParams(toolId, req.rawMessage, params, req.clarifiedParams);
+
+  const start_date = values.start_date;
+  const end_date = values.end_date;
+  if (typeof start_date !== "string" || typeof end_date !== "string") {
+    return {
+      kind: "clarify",
+      missing: [`${toolId}.start_date`, `${toolId}.end_date`],
+      question:
+        stmt === "pnl"
+          ? 'For the Profit & Loss, which date range should I use? (e.g. "2026-01-01 to 2026-09-30", or "this year to date")'
+          : 'For the balance sheet, which date should I use? (e.g. "as of 2025-12-31" or "as of last month end")',
+    };
+  }
+
+  const tp: Record<string, unknown> = { start_date, end_date };
+  if (typeof values.summarize_column_by === "string") {
+    tp.summarize_column_by = values.summarize_column_by;
+  }
+  if (typeof values.accounting_method === "string") {
+    tp.accounting_method = values.accounting_method;
+  }
+  // "save it to data" → persist the structured statement rows alongside the HTML.
+  if (wantsSaveToData(req.rawMessage)) {
+    const year = start_date.slice(0, 4);
+    tp.save_to =
+      stmt === "pnl" ? `chat_qbo_pnl_${year}` : `chat_qbo_balance_sheet_${year}`;
+  }
+
+  const steps: PlanStep[] = [
+    {
+      tool_id: toolId,
+      tool_parameters: tp,
+      label: stmt === "pnl" ? "Fetch QBO P&L" : "Fetch QBO Balance Sheet",
+    },
+    {
+      tool_id: "chat_download",
+      tool_parameters: { data: "{{result}}", filename: "report.html" },
+      label: "Download report",
+    },
+  ];
+  return { kind: "plan", plan: { steps }, missingRequired: [] };
+}
+
+/** QBO targeted read → single read tool (summarized by the plan renderer). */
+async function qboReadPlan(req: PlanRequest, toolId: string): Promise<PlanResult> {
+  const params = await getToolParams(toolId);
+  const { values } = extractParams(toolId, req.rawMessage, params, req.clarifiedParams);
+  const missing = params
+    .filter((p) => p.required && values[p.name] === undefined)
+    .map((p) => p.name);
+  if (missing.length > 0) {
+    return {
+      kind: "clarify",
+      missing: missing.map((m) => `${toolId}.${m}`),
+    };
+  }
+  const steps: PlanStep[] = [
+    { tool_id: toolId, tool_parameters: values, label: toolId },
+  ];
+  return { kind: "plan", plan: { steps }, missingRequired: [] };
+}
+
+/** Planning variance report → report_plan_variance → chat_download. */
+async function planningVariancePlan(req: PlanRequest): Promise<PlanResult> {
+  const toolId = "report_plan_variance";
+  const params = await getToolParams(toolId);
+  const { values } = extractParams(toolId, req.rawMessage, params, req.clarifiedParams);
+
+  if (typeof values.fy !== "number") {
+    return {
+      kind: "clarify",
+      missing: ["report_plan_variance.fy"],
+      question:
+        'Which fiscal year should I compare? (e.g. "FY2026" or "2026")',
+    };
+  }
+
+  const tp: Record<string, unknown> = {
+    fy: values.fy,
+    base: typeof values.base === "string" ? values.base : "actuals",
+    compare:
+      typeof values.compare === "string"
+        ? values.compare
+        : planningCompareVersion(req.rawMessage),
+  };
+  if (typeof values.title === "string") tp.title = values.title;
+
+  const steps: PlanStep[] = [
+    {
+      tool_id: "report_plan_variance",
+      tool_parameters: tp,
+      label: "Build budget-vs-actual report",
+    },
+    {
+      tool_id: "chat_download",
+      tool_parameters: { data: "{{result}}", filename: "budget-variance.html" },
+      label: "Download report",
+    },
+  ];
+  return { kind: "plan", plan: { steps }, missingRequired: [] };
+}
+
+/** Cash forecast → cash-balance feed → plan_forecast. */
+async function planningForecastPlan(req: PlanRequest): Promise<PlanResult> {
+  const feedTool = cashFeedTool(req.databaseId);
+  if (!feedTool) return { kind: "fallback", reason: "no cash-balance feed tool available" };
+
+  const toolId = "plan_forecast";
+  const params = await getToolParams(toolId);
+  const { values } = extractParams(toolId, req.rawMessage, params, req.clarifiedParams);
+
+  const fy = typeof values.fy === "number" ? values.fy : new Date().getFullYear();
+  const cutover =
+    typeof values.cutover_per === "number" && values.cutover_per >= 1 && values.cutover_per <= 12
+      ? values.cutover_per
+      : cutoverFromText(req.rawMessage) ?? defaultCutoverFor(fy);
+
+  if (cutover < 1 || cutover > 12) {
+    return {
+      kind: "clarify",
+      missing: ["plan_forecast.cutover_per"],
+      question:
+        'Through which month do you have actuals? (e.g. "through September")',
+    };
+  }
+
+  const tp: Record<string, unknown> = {
+    fy,
+    cutover_per: cutover,
+    source: "cash_balances",
+    method: "hold",
+  };
+  if (typeof values.account === "string") tp.account = values.account;
+
+  const report: Record<string, unknown> = { fy, cutover_per: cutover, method: "hold" };
+  if (typeof values.account === "string") report.account = values.account;
+
+  const steps: PlanStep[] = [
+    {
+      tool_id: feedTool,
+      tool_parameters: { start_date: `${fy}-01-01`, end_date: `${fy}-12-31`, store_to: "cash_balances" },
+      label: feedTool.startsWith("qbodemo_") ? "Pull demo cash balances" : "Pull QBO cash balances",
+    },
+    {
+      tool_id: "plan_forecast",
+      tool_parameters: tp,
+      label: "Build cash forecast",
+    },
+    {
+      tool_id: "report_plan_cash_forecast",
+      tool_parameters: report,
+      label: "Render cash forecast report",
+    },
+    {
+      tool_id: "chat_download",
+      tool_parameters: { data: "{{result}}", filename: "cash-forecast.html" },
+      label: "Download report",
+    },
+  ];
+  return { kind: "plan", plan: { steps }, missingRequired: [] };
+}
+
+/** True when the request asks for a bespoke/custom dashboard or chart layout —
+ *  beyond what the fixed `report_table` drill-down template can express. Such
+ *  requests defer to the LLM build loop (which authors HTML per the
+ *  report-authoring skill). */
+function isBespokeRequest(raw: string): boolean {
+  return /(dashboard|chart|graph|visuali[sz]ation|bespoke|\bcustom\s+(dashboard|report|html|page|view|layout|graph|chart))\b/i.test(
+    raw,
+  );
+}
+
+/** True when the request is an error/audit check rather than a summarization. */
+function isCheckRequest(raw: string): boolean {
+  return /\b(errors?|issues?|reconcile|validate|audit|mismatch|unbalanced|missing|unreviewed|flag)\b/i.test(
+    raw,
+  );
+}
+
+/** True when the request explicitly asks to aggregate/summarize. */
+function isExplicitAggregation(raw: string): boolean {
+  return /\b(sum|total|aggregate|group\s+by|average|avg|count|subtotal|breakdown)\b/i.test(raw);
+}
+
+/** Resolve a referenced workspace rule into a filter predicate + notes, grounded
+ *  on `columns`. Returns a `clarify` PlanResult when the rule can't be resolved
+ *  or expressed — never a silent no-op. */
+async function resolveRule(
+  req: PlanRequest,
+  workspaceRules: { name: string; description?: string; content: string }[],
+  columns: string[],
+  sourceLabel: string,
+): Promise<{ filter?: FilterClause[]; notes?: string[] } | PlanResult> {
+  if (workspaceRules.length === 0) {
+    return {
+      kind: "clarify",
+      missing: [],
+      question:
+        `You referenced a workspace rule, but this workspace has no rules defined. ` +
+        `What's the rule you want applied (e.g. "a row is X if its Date has passed or Category is Y")?`,
+    };
+  }
+  const resolved = await resolveRulePredicate(req, workspaceRules, columns);
+  // A matched rule must yield at least a predicate or a statement; otherwise
+  // it wasn't actually expressed (silently proceeding would drop the rule).
+  const usable =
+    !!resolved &&
+    resolved.matched &&
+    ((resolved.predicate?.length ?? 0) > 0 || !!resolved.statement);
+  if (!usable) {
+    return {
+      kind: "clarify",
+      missing: [],
+      question:
+        `I couldn't match the rule you referenced to a workspace rule I can apply as a data filter. ` +
+        `Could you restate it (e.g. "keep rows whose Date is before today")?`,
+    };
+  }
+  // Validate the predicate against real columns — fail closed on any mismatch.
+  const bad = (resolved.predicate ?? []).filter((c) => !columns.includes(c.column));
+  if (bad.length > 0) {
+    return {
+      kind: "clarify",
+      missing: [],
+      question:
+        `The rule references columns I don't see in ${sourceLabel} (${bad.map((b) => `\`${b.column}\``).join(", ")}). ` +
+        `Available columns: ${columns.join(", ")}. How should I express the rule?`,
+    };
+  }
+  return {
+    filter: resolved.predicate && resolved.predicate.length > 0 ? resolved.predicate : undefined,
+    notes: resolved.statement ? [resolved.statement] : undefined,
+  };
+}
+
+/** A report per source: read → aggregate → save staging → report → download. The
+ *  rule filter/notes are attached only to the source(s) whose columns contain
+ *  every predicate column. */
+async function buildMultiSourcePlan(
+  req: PlanRequest,
+  flags: Flags,
+  sources: string[],
+  inventory: { name: string; columns: string[] }[],
+  rule: { filter?: FilterClause[]; notes?: string[] } | undefined,
+): Promise<PlanResult> {
+  const steps: PlanStep[] = [];
+  for (const source of sources) {
+    const entry = inventory.find((d) => d.name === source);
+    const columns = entry?.columns ?? [];
+
+    const applies = !!rule?.filter && rule.filter.every((c) => columns.includes(c.column));
+    const filter = applies ? rule!.filter : undefined;
+    const notes = applies ? rule!.notes : undefined;
+
+    const args = await llmFillAnalysisArgs(req, source, columns, flags, filter);
+
+    const staging = `staging_${source}_summary`.toLowerCase().replace(/[^a-z0-9_]/g, "_");
+    const filename = `${source}.html`.toLowerCase().replace(/[^a-z0-9_.-]/g, "_");
+
+    steps.push({ tool_id: "get_data", tool_parameters: { name: source }, label: `Read ${source}` });
+
+    const tp: Record<string, unknown> = { name: source };
+    if (args.group_by?.length) tp.group_by = args.group_by;
+    if (args.measures?.length) tp.measures = args.measures;
+    if (filter) tp.filter = filter;
+    steps.push({ tool_id: "aggregate_data", tool_parameters: tp, label: `Summarize ${source}` });
+
+    steps.push({
+      tool_id: "save_data",
+      tool_parameters: { name: staging, value: "{{result}}", type: "json_array" },
+      label: `Save ${source} summary`,
+    });
+
+    const rp: Record<string, unknown> = { summary: staging, details: source };
+    rp.group_by = args.group_by ?? [];
+    if (args.detail_columns?.length) rp.detail_columns = args.detail_columns;
+    if (args.title) rp.title = args.title;
+    if (filter) rp.filter = filter;
+    if (notes) rp.notes = notes;
+    steps.push({ tool_id: "report_table", tool_parameters: rp, label: `Build ${source} report` });
+
+    steps.push({
+      tool_id: "chat_download",
+      tool_parameters: { data: "{{result}}", filename },
+      label: `Download ${source} report`,
+    });
+  }
+
+  // Fail closed: any unresolved required arg → defer to the LLM planner.
+  const missingRequired: string[] = [];
+  for (const s of steps) {
+    for (const m of await stepMissing(s.tool_id, s.tool_parameters)) {
+      missingRequired.push(`${s.tool_id}.${m}`);
+    }
+  }
+  if (missingRequired.length > 0) {
+    return { kind: "fallback", reason: `missing required: ${missingRequired.join(", ")}` };
+  }
+
+  return { kind: "plan", plan: { steps }, missingRequired: [] };
+}
+
+/** Analysis over loaded workspace data → aggregate/judge → report → download. */
+async function analysisPlan(
+  req: PlanRequest,
+  flags: Flags,
+  ctx: ShapeContext,
+): Promise<PlanResult> {
+  // Bespoke dashboards/charts are generative — defer to the LLM build loop.
+  if (flags.bespoke || isBespokeRequest(req.rawMessage)) {
+    return { kind: "fallback", reason: "bespoke report — defer to build loop", preferLoop: true };
+  }
+
+  // A broad "analyze/explore this data" request (no specific aggregation, check,
+  // or report) is open-ended analysis — the LLM build loop explores the tables,
+  // runs per-row rule-compliance checks (judge_data), and composes findings.
+  // Defer there rather than emit a shallow list_data/list_rules inventory plan.
+  if (flags.explore && !flags.aggregate && !flags.report && !flags.judge && !flags.bespoke) {
+    return { kind: "fallback", reason: "broad data exploration — defer to build loop", preferLoop: true };
+  }
+
+  const inventory = dataInventory(req.databaseId);
+
+  // Follow-ups always reuse the prior turn's source (and saved summary).
+  const followUp = referencesPrior(req.rawMessage);
+  const last = req.analysisHistory?.[0];
+
+  // Deterministic name-token match: every loaded file the request names, so
+  // "give me all the X data" matches every file with "X" in its name.
+  // `staging_*` summaries are transient intermediates, not sources.
+  const nameMatches = resolveDataNames(
+    req.rawMessage,
+    inventory.filter((d) => !d.name.startsWith("staging_")).map((d) => ({ name: d.name })),
+  );
+
+  // Resolve the requested data sources: union of the classifier's per-file
+  // matches (fuzzy/paraphrase) and the deterministic name matches (literal),
+  // so a named token is never silently dropped.
+  let sources: string[];
+  if (followUp && last?.source) {
+    sources = [last.source];
+  } else {
+    sources = Array.from(new Set([...ctx.dataFiles, ...nameMatches]));
+  }
+
+  if (sources.length === 0) {
+    // Nothing resolved by name or classifier. If the request still referenced a
+    // data source (per the classifier), surface the mismatch.
+    if (flags.unresolved_source && !followUp) {
+      const names = inventory.map((d) => d.name);
+      return {
+        kind: "clarify",
+        missing: [],
+        question:
+          `I don't see every source you referenced among the loaded data files. ` +
+          `Loaded: ${names.length ? names.map((n) => `\`${n}\``).join(", ") : "(none)"}. ` +
+          `Which file should I analyze — or do you need to upload a file first?`,
+      };
+    }
+    return { kind: "fallback", reason: "no data source resolved" };
+  }
+
+  // Resolve a referenced workspace rule into a deterministic filter predicate.
+  // Grounded on the union of the requested sources' columns so the predicate can
+  // target any of them; applied per-source below.
+  const workspaceRules = loadRules(req.databaseId);
+  let rule: { filter?: FilterClause[]; notes?: string[] } | undefined;
+  if (referencesRule(req.rawMessage, workspaceRules)) {
+    const union = [...new Set(sources.flatMap((s) => inventory.find((d) => d.name === s)?.columns ?? []))];
+    const sourceLabel = sources.length === 1 ? `\`${sources[0]}\`` : "these data files";
+    const r = await resolveRule(req, workspaceRules, union, sourceLabel);
+    if ("kind" in r) return r;
+    rule = r;
+  }
+
+  // Multi-source: run the aggregate → report → download pipeline per source.
+  if (sources.length > 1) {
+    return buildMultiSourcePlan(req, flags, sources, inventory, rule);
+  }
+
+  const source = sources[0];
+  const entry = inventory.find((d) => d.name === source);
+  const columns = entry?.columns ?? [];
+  const filter = rule?.filter;
+  const ruleNotes = rule?.notes;
+
+  const reuseSummary = followUp && last?.savedSummary ? last.savedSummary : null;
+
+  const steps: PlanStep[] = [];
+
+  if (reuseSummary) {
+    // Report the already-saved summary (skip re-reading / re-aggregating).
+    if (!flags.report) {
+      return { kind: "fallback", reason: "follow-up reuse without report not templated" };
+    }
+    const args = await llmFillAnalysisArgs(req, source, columns, flags, filter);
+    // Reuse the prior aggregation's grouping so the join keys match the summary.
+    const gb = last?.groupBy?.length ? last.groupBy : (args.group_by ?? []);
+    const rp: Record<string, unknown> = { summary: reuseSummary, details: source };
+    rp.group_by = gb;
+    if (args.detail_columns?.length) rp.detail_columns = args.detail_columns;
+    if (args.title) rp.title = args.title;
+    if (filter) rp.filter = filter;
+    if (ruleNotes) rp.notes = ruleNotes;
+    steps.push({ tool_id: "report_table", tool_parameters: rp, label: "Build report" });
+    steps.push({
+      tool_id: "chat_download",
+      tool_parameters: { data: "{{result}}", filename: "report.html" },
+      label: "Download report",
+    });
+  } else {
+    // A report needs a summary table — aggregate whenever report is requested.
+    // But an error/audit check ("analyze for errors", "reconcile", "validate")
+    // is a judge task, not a summarization: skip the aggregate+save unless the
+    // request explicitly asks to total/group by something.
+    const checkOnly = isCheckRequest(req.rawMessage) && !isExplicitAggregation(req.rawMessage);
+    const doAggregate = checkOnly ? false : (flags.aggregate || flags.report);
+    const args = await llmFillAnalysisArgs(req, source, columns, flags, filter);
+
+    const staging = `staging_${source}_summary`.toLowerCase().replace(/[^a-z0-9_]/g, "_");
+
+    steps.push({ tool_id: "get_data", tool_parameters: { name: source }, label: "Read data" });
+
+    if (doAggregate) {
+      const tp: Record<string, unknown> = { name: source };
+      if (args.group_by?.length) tp.group_by = args.group_by;
+      if (args.measures?.length) tp.measures = args.measures;
+      if (filter) tp.filter = filter;
+      steps.push({ tool_id: "aggregate_data", tool_parameters: tp, label: "Summarize" });
+
+      // Persist the aggregate summary immediately so {{result}} is the aggregate
+      // (not a later judge step) and a follow-up report can reuse it.
+      if (flags.report || flags.persist) {
+        steps.push({
+          tool_id: "save_data",
+          tool_parameters: { name: staging, value: "{{result}}", type: "json_array" },
+          label: "Save summary",
+        });
+      }
+    }
+
+    if (flags.judge) {
+      const checks = args.checks ?? [];
+      steps.push({
+        tool_id: "check_data",
+        tool_parameters: { name: source, checks },
+        label: "Check issues",
+      });
+    }
+
+    if (flags.report && doAggregate) {
+      const rp: Record<string, unknown> = { summary: staging, details: source };
+      rp.group_by = args.group_by ?? [];
+      if (args.detail_columns?.length) rp.detail_columns = args.detail_columns;
+      if (args.title) rp.title = args.title;
+      if (filter) rp.filter = filter;
+      if (ruleNotes) rp.notes = ruleNotes;
+      steps.push({ tool_id: "report_table", tool_parameters: rp, label: "Build report" });
+      steps.push({
+        tool_id: "chat_download",
+        tool_parameters: { data: "{{result}}", filename: "report.html" },
+        label: "Download report",
+      });
+    }
+  }
+
+  // Fail closed: any unresolved required arg → defer to the LLM planner.
+  const missingRequired: string[] = [];
+  for (const s of steps) {
+    for (const m of await stepMissing(s.tool_id, s.tool_parameters)) {
+      missingRequired.push(`${s.tool_id}.${m}`);
+    }
+  }
+  if (missingRequired.length > 0) {
+    return { kind: "fallback", reason: `missing required: ${missingRequired.join(", ")}` };
+  }
+
+  const plan: NodePlan = { steps };
+  return { kind: "plan", plan, missingRequired: [] };
+}
+
+// ── data-review shape: deterministic accountant's review battery ───────────
+// "review the interco data" — Jev composes a compact, deterministic battery over
+// the loaded tables (bulk read → profile → broad checks → relationships →
+// footings) instead of the LLM free-exploring table-by-table in the build loop.
+
+/** Broad, dataset-agnostic yes/no checks covering the eight review categories
+ *  (completeness, existence, footing, valuation/agreement, classification,
+ *  cutoff, consistency, no-guessing). Batched into one check_data (Jev) call per
+ *  table. */
+const REVIEW_CHECKS = [
+  { id: "missing_key_fields", question: "Are any rows missing a key identifier (an ID, entity/account name, date, or code)?" },
+  { id: "duplicates", question: "Are any rows exact duplicates of another row?" },
+  { id: "renamed_entities", question: "Does the same real entity/account appear under two different names anywhere?" },
+  { id: "miscoded", question: "Are any rows coded to an account/class/category that does not match their description or memo?" },
+  { id: "date_issues", question: "Are any dates missing, future, or outside the plausible period for this data?" },
+  { id: "amount_sign", question: "Are any amounts negative where a positive is expected, or vice versa?" },
+  { id: "unallocated", question: "Are any rows missing an allocation rule / category / reference they should have?" },
+  { id: "inconsistent_naming", question: "Is any entity/account named inconsistently across rows?" },
+];
+
+/** Columns whose name suggests a numeric "amount" to foot/aggregate. */
+const AMOUNT_HINT = /amount|total|balance|debit|credit|fee|revenue|cost|principal|interest|value|price|gross|net|sum/i;
+
+/** Preferred categorical grouping keys (entity/account/status/…). */
+const PRIMARY_GROUP_HINT = /entity|account|name|from\b|to\b|status|class|type|category|currency|rule/i;
+
+/** Fallback grouping keys (ids / codes / dates) — used only when no primary key
+ *  exists, so a "Txn ID" column doesn't win over "From Entity". */
+const SECONDARY_GROUP_HINT = /code|ref|id\b|period|date/i;
+
+interface ReviewEntry {
+  name: string;
+  columns: string[];
+  columnTypes: Record<string, string> | null;
+  rowCount: number;
+}
+
+/** Tabular data entries (with columns + inferred types) for the review battery. */
+function reviewInventory(databaseId: string): ReviewEntry[] {
+  try {
+    const ws = getSessionByDatabaseId(databaseId);
+    if (!ws) return [];
+    return ws
+      .getDataNames()
+      .map((name: string) => {
+        const e = ws.getDataEntry(name);
+        return {
+          name,
+          columns: Array.isArray(e?.columns) ? (e.columns as string[]) : [],
+          columnTypes: (e?.column_types as Record<string, string> | null) ?? null,
+          rowCount: typeof e?.row_count === "number" ? e.row_count : 0,
+        };
+      })
+      .filter((e) => e.columns.length > 0);
+  } catch {
+    return [];
+  }
+}
+
+function isNumericColumn(col: string, types: Record<string, string> | null): boolean {
+  if (types && typeof types[col] === "string") {
+    return /number|integer|float|decimal|currency|percent/i.test(types[col]);
+  }
+  return AMOUNT_HINT.test(col);
+}
+
+function pickMeasureCol(entry: ReviewEntry): string | null {
+  const numeric = entry.columns.filter((c) => isNumericColumn(c, entry.columnTypes));
+  const byHint = numeric.filter((c) => AMOUNT_HINT.test(c));
+  return byHint[0] ?? numeric[0] ?? null;
+}
+
+function pickGroupCol(entry: ReviewEntry): string | null {
+  const categorical = entry.columns.filter((c) => !isNumericColumn(c, entry.columnTypes));
+  const primary = categorical.filter((c) => PRIMARY_GROUP_HINT.test(c));
+  if (primary.length > 0) return primary[0];
+  const secondary = categorical.filter((c) => SECONDARY_GROUP_HINT.test(c));
+  return secondary[0] ?? categorical[0] ?? null;
+}
+
+/** Detect cross-foot columns: a "Total X" column that should equal the sum of
+ *  the columns whose names end in "X" (e.g. "Total Expenses" = "Fund I Expenses"
+ *  + "Fund II Expenses"). These become explicit `footings` on the profile step. */
+function detectFootings(columns: string[]): { leftColumn: string; rightColumns: string[] }[] {
+  const out: { leftColumn: string; rightColumns: string[] }[] = [];
+  for (const total of columns.filter((c) => /\btotal\b/i.test(c) && !/percent|%|rate/i.test(c))) {
+    const suffix = total.replace(/\btotal\b/i, "").trim();
+    if (suffix.length < 3) continue;
+    const parts = columns.filter((c) => c !== total && c.toLowerCase().endsWith(suffix.toLowerCase()));
+    if (parts.length >= 2) out.push({ leftColumn: total, rightColumns: parts });
+  }
+  return out;
+}
+
+/** Deterministic review battery: bulk read → per-table profile → broad checks on
+ *  the largest table → relationship discovery → per-table footing totals. */
+async function dataReviewPlan(
+  req: PlanRequest,
+  flags: Flags,
+  ctx: ShapeContext,
+): Promise<PlanResult> {
+  const inventory = reviewInventory(req.databaseId).filter((d) => !d.name.startsWith("staging_"));
+
+  // Resolve the target tables: the classifier's per-file matches ∪ the request's
+  // literal name matches; a review with no resolvable reference reviews ALL
+  // loaded tables (a review is inherently whole-workbook).
+  const nameMatches = resolveDataNames(req.rawMessage, inventory.map((d) => ({ name: d.name })));
+  let sources = Array.from(new Set([...ctx.dataFiles, ...nameMatches]));
+  if (sources.length === 0) sources = inventory.map((d) => d.name);
+  const target = inventory
+    .filter((d) => sources.includes(d.name))
+    .slice(0, 15)
+    .sort((a, b) => b.rowCount - a.rowCount);
+
+  if (target.length === 0) {
+    return { kind: "fallback", reason: "no tabular data to review" };
+  }
+
+  const steps: PlanStep[] = [];
+
+  // 1) One bulk read of every target table (collapses N sequential get_data).
+  steps.push({
+    tool_id: "get_data",
+    tool_parameters: { names: target.map((t) => t.name) },
+    label: `Read ${target.length} tables`,
+  });
+
+  // 2) Profile each table — completeness / duplicates / type violations, plus
+  //    explicit cross-foot footings when a "Total X" column decomposes.
+  for (const t of target) {
+    const tp: Record<string, unknown> = { name: t.name };
+    const footings = detectFootings(t.columns);
+    if (footings.length > 0) tp.footings = footings;
+    steps.push({ tool_id: "profile_data", tool_parameters: tp, label: `Profile ${t.name}` });
+  }
+
+  // 3) Broad Jev checks over the largest table (the ledger/transaction table).
+  const largest = target[0];
+  steps.push({
+    tool_id: "check_data",
+    tool_parameters: { name: largest.name, checks: REVIEW_CHECKS },
+    label: `Check ${largest.name}`,
+  });
+
+  // 4) Discover cross-table links (drives any reconciliation).
+  steps.push({ tool_id: "list_relationships", tool_parameters: {}, label: "Discover relationships" });
+
+  // 5) Footing: grand-total aggregate per table with a numeric column.
+  for (const t of target) {
+    const measure = pickMeasureCol(t);
+    if (!measure) continue;
+    const group = pickGroupCol(t);
+    const tp: Record<string, unknown> = { name: t.name, measures: [{ column: measure, fn: "sum" }] };
+    if (group && group !== measure) tp.group_by = [group];
+    steps.push({ tool_id: "aggregate_data", tool_parameters: tp, label: `Total ${t.name}` });
+  }
+
+  // Fail closed: any unresolved required arg → defer to the LLM build loop.
+  const missingRequired: string[] = [];
+  for (const s of steps) {
+    for (const m of await stepMissing(s.tool_id, s.tool_parameters)) {
+      missingRequired.push(`${s.tool_id}.${m}`);
+    }
+  }
+  if (missingRequired.length > 0) {
+    return { kind: "fallback", reason: `missing required: ${missingRequired.join(", ")}` };
+  }
+
+  return { kind: "plan", plan: { steps }, missingRequired: [] };
+}
+
+// ── Shape registry ──────────────────────────────────────────────────────────
+// Dispatch order is priority (descending). The classifier fan-out and the
+// dispatch loop in `plan()` are both derived from this table.
+
+const SHAPES: ShapeDef[] = [
+  {
+    id: "qbo-statement",
+    priority: 100,
+    nouls: {
+      qbo_statement:
+        "Does this request ask for a QuickBooks Online financial statement (Profit & Loss / income statement, or Balance Sheet)?",
+    },
+    matches: (f) => f.qbo_statement,
+    build: async (req) => {
+      const stmt = qboStatementType(req.rawMessage);
+      if (!stmt) return { kind: "fallback", reason: "qbo statement type unresolved" };
+      return qboStatementPlan(req, stmt);
+    },
+  },
+  {
+    id: "qbo-read",
+    priority: 100,
+    nouls: {
+      qbo_read:
+        "Does this request ask for a targeted QuickBooks Online analysis or a list (GL review, AR/AP aging, duplicates, recurring expense gaps, uncategorized transactions, or an accounts/customers/vendors/invoices/bills/classes/locations list)?",
+    },
+    matches: (f) => f.qbo_read,
+    build: async (req) => {
+      const toolId = qboReadTool(req.rawMessage);
+      if (!toolId) return { kind: "fallback", reason: "qbo read tool unresolved" };
+      return qboReadPlan(req, toolId);
+    },
+  },
+  {
+    id: "planning-variance",
+    priority: 100,
+    nouls: {
+      planning_report:
+        "Does this request ask for a budget-vs-actual variance report or comparison?",
+    },
+    matches: (f) => f.planning_report,
+    build: async (req) => planningVariancePlan(req),
+  },
+  {
+    id: "planning-forecast",
+    priority: 100,
+    nouls: {
+      planning_forecast:
+        "Does this request ask to forecast future cash — project month-end bank/cash balances for the rest of a fiscal year?",
+    },
+    matches: (f) => f.planning_forecast,
+    build: async (req) => planningForecastPlan(req),
+  },
+  {
+    id: "data-review",
+    priority: 50,
+    nouls: {
+      review:
+        "Does this request ask to review, audit, analyze, explore, reconcile, check, foot, or tie-out the loaded data the way an accountant would — broadly surfacing findings across completeness, existence/orphans, footing, valuation/agreement across sources, classification/allocation, cutoff/timing, consistency, and no-guessing — rather than a specific aggregation, a specific yes/no check, or a report?",
+    },
+    matches: (f) => f.review,
+    build: (req, flags, ctx) => dataReviewPlan(req, flags, ctx),
+  },
+  {
+    id: "analysis",
+    priority: 0,
+    nouls: {
+      aggregate:
+        "Does this request need to aggregate/summarize data — group by a column and compute sum/count/avg (e.g. 'total X by Y')? Error-checking/audit requests are NOT aggregation.",
+      judge:
+        "Does this request need a yes/no check over the whole dataset (e.g. 'are any rows missing a GL Account?')?",
+      report:
+        "Does this request ask for a report, dashboard, or downloadable file as the outcome?",
+      bespoke:
+        "Does this request ask for a custom/bespoke dashboard, chart, or visualization layout that a fixed drill-down table template cannot express?",
+      explore:
+        "Does this request ask to broadly analyze, explore, or understand the loaded data to surface findings, patterns, or issues (e.g. 'analyze the data', 'review this data', 'what's going on here') — rather than a specific aggregation, a specific yes/no check, or a specific report?",
+      persist: "Should the result be saved to the workspace as durable data?",
+      unresolved_source:
+        "Does this request reference a data file, report, or document by name that is NOT present in the provided list of loaded data files?",
+    },
+    matches: (f) => f.aggregate || f.report || f.judge || f.bespoke || f.explore,
+    build: (req, flags, ctx) => analysisPlan(req, flags, ctx),
+  },
+];
+
+SHAPES.sort((a, b) => b.priority - a.priority);
+
+/** Register an additional shape at runtime (e.g. for a non-internal MCP server's
+ *  tools). Re-sorts so priority order is preserved. */
+export function registerShape(shape: ShapeDef): void {
+  SHAPES.push(shape);
+  SHAPES.sort((a, b) => b.priority - a.priority);
+}
+
+/** Stage 1 — one Jev fan-out classifies every shape's nouls and (when data is
+ *  loaded) which data files the request references. The question set is derived
+ *  from the registry so adding a shape needs no change here. */
+async function classify(
+  req: PlanRequest,
+): Promise<{ flags: Flags; dataFiles: string[] }> {
+  const key = await getClassifierKey(req.userId);
+
+  let privacyMap = loadPrivacyMap(req.databaseId);
+  const probe = { system: "", messages: [{ role: "user", content: req.rawMessage }] };
+  const { added } = discoverRequestValues(req.databaseId, probe);
+  if (added > 0) privacyMap = loadPrivacyMap(req.databaseId);
+
+  const inventory = dataInventory(req.databaseId);
+
+  const state = {
+    request: privacyMap ? maskText(req.rawMessage, privacyMap) : req.rawMessage,
+    data_files: inventory.map((d) =>
+      d.columns.length ? `${d.name} (${d.columns.join(", ")})` : d.name,
+    ),
+    workspace_rules: ruleBriefLines(req.databaseId),
+  };
+
+  const questions: Record<string, Question> = {};
+  for (const shape of SHAPES) {
+    for (const [id, instructions] of Object.entries(shape.nouls)) {
+      questions[id] = { type: "noul", instructions };
+    }
+  }
+
+  // One noul per loaded data file — independent yes/no so a request that
+  // references several files is detected, not narrowed to a single pick.
+  // `staging_*` summaries are transient intermediates, not analysis targets.
+  const dataFileById: Record<string, string> = {};
+  inventory.forEach((d, i) => {
+    if (d.name.startsWith("staging_")) return;
+    const id = `data_file_${i}`;
+    dataFileById[id] = d.name;
+    questions[id] = {
+      type: "noul",
+      instructions: `Does this request ask to read or analyze the data file named "${d.name}"?`,
+    };
+  });
+
+  const t0 = Date.now();
+  const { response } = await askClassifier(state, questions, { apiKey: key });
+  await logAndFireJev({
+    databaseId: req.databaseId,
+    sessionId: req.sessionId,
+    mode: req.mode,
+    phase: "plan-shape",
+    questions,
+    state,
+    answers: response.answers,
+    model: response.model,
+    usage: response.usage,
+    durationMs: Date.now() - t0,
+  });
+  const noul = (name: string) => (response.answers[name] as NoulAnswer).noul >= N;
+
+  const flags: Flags = {};
+  for (const shape of SHAPES) {
+    for (const id of Object.keys(shape.nouls)) flags[id] = noul(id);
+  }
+
+  const dataFiles: string[] = [];
+  for (const [id, name] of Object.entries(dataFileById)) {
+    if (noul(id)) dataFiles.push(name);
+  }
+
+  return { flags, dataFiles };
+}
+
+export const cascadePlanner: Planner = {
+  id: "cascade",
+  async plan(req: PlanRequest): Promise<PlanResult> {
+    const { flags, dataFiles } = await classify(req);
+    const ctx: ShapeContext = { dataFiles };
+
+    // Deterministic QBO statement gate — a balance-sheet / P&L request must
+    // resolve to report_qbo_bs/pnl (or ask for its date), never fall through to
+    // a read tool or an LLM guessing the "as of" date.
+    const stmt = qboStatementType(req.rawMessage);
+    if (stmt) {
+      return await qboStatementPlan(req, stmt);
+    }
+
+    for (const shape of SHAPES) {
+      if (shape.matches(flags)) {
+        return await shape.build(req, flags, ctx);
+      }
+    }
+
+    return { kind: "fallback", reason: "no shape matched" };
+  },
+};

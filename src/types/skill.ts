@@ -13,7 +13,9 @@ export interface Skill {
   description?: string;
   scope?: SkillScope;
   tags?: string[];
-  content: string;       // markdown body (Instructions + Tools needed)
+  content: string;       // markdown body (Instructions + Rules)
+  /** Structured tool references (authoritative; parsed once from frontmatter). */
+  tools?: { name: string; role?: string }[];
   created_at?: string;
   updated_at?: string;
 }

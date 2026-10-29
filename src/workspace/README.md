@@ -68,7 +68,7 @@ The `.wfp` document has these top-level nodes:
 | `tools` | `Tool[]` | `getTools()`, `upsertTool()`, `deleteTool()` | Custom JavaScript tools |
 | `data` | `Record<string, DataEntry>` | `getDataEntry()`, `setDataEntry()`, `deleteDataEntry()` | CSV/JSON/file data |
 | `knowledge` | `KnowledgePack[]` | `getKnowledgePacks()`, `upsertKnowledgePack()`, `deleteKnowledgePack()` | Markdown knowledge documents |
-| `rules` | `Rule[]` | `getRules()`, `getRule()`, `upsertRule()`, `deleteRule()` | Workspace rules & preferences (surfaced as "Rules" in the UI). Each has `name`, `description`, `scope`, `tags`, `content` (markdown body with `## Instructions` and `## Tools needed` sections). Injected into chat and the workflow builder. |
+| `rules` | `Rule[]` | `getRules()`, `getRule()`, `upsertRule()`, `deleteRule()` | Workspace rules & preferences (surfaced as "Rules" in the UI). Each has `name`, `description`, `tags`, `content` (markdown body with `## Instructions` and `## Rules` sections) and `tools` (structured `{ name, role? }[]` tool references — the authoritative form; a legacy `## Tools needed` section is derived at read time). Injected into chat and the workflow builder. |
 | `sessions` | `Session[]` | `getSessions()`, `upsertSession()`, `deleteSession()` | Chat and automation sessions |
 | `plan` | `PlanEntry[]` | `getPlan()`, `setPlan()` | Flat plan entries (host-specific) |
 | `todos` | `TodoEntry[]` | `getTodos()`, `setTodos()` | Task items (host-specific) |

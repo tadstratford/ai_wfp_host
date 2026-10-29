@@ -13,39 +13,15 @@
  */
 
 import { loadRules } from "../../rules/loader";
+import { declaredTools } from "../../core/skills/loader";
 import { askClassifier } from "@shared/typesafe/openRouter";
 import type { ChoiceAnswer, Question } from "@shared/typesafe/types";
 import { getClassifierKey } from "@backend/core/user/getLLMApiKey";
 import { loadPrivacyMap } from "@backend/core/knowledge/index";
 import { maskText, discoverRequestValues } from "@backend/core/knowledge/autoMask";
 import { logAndFireJev } from "../jevLog";
-import type { SelectedRule, SelectionConfig } from "./types";
-
-const DEFAULTS: SelectionConfig = {
-  tagThreshold: 0.3,
-  probThreshold: 0.15,
-  maxRules: 8,
-  maxTags: 50,
-  maxCandidates: 40,
-};
-
-function num(key: string, fallback: number): number {
-  const raw = process.env[key];
-  if (!raw) return fallback;
-  const n = Number(raw);
-  return Number.isFinite(n) ? n : fallback;
-}
-
-/** Sensitivity levers, read from env so a deployment can tune strictness. */
-export function selectionConfig(): SelectionConfig {
-  return {
-    tagThreshold: num("RULE_TAG_THRESHOLD", DEFAULTS.tagThreshold),
-    probThreshold: num("RULE_PROB_THRESHOLD", DEFAULTS.probThreshold),
-    maxRules: Math.max(1, Math.round(num("RULE_MAX_RULES", DEFAULTS.maxRules))),
-    maxTags: Math.max(1, Math.round(num("RULE_MAX_TAGS", DEFAULTS.maxTags))),
-    maxCandidates: Math.max(1, Math.round(num("RULE_MAX_CANDIDATES", DEFAULTS.maxCandidates))),
-  };
-}
+import type { SelectedRule } from "./types";
+import { loadConfig } from "./config";
 
 export interface RuleSelectionContext {
   lastRequest?: string;
@@ -73,7 +49,7 @@ export async function selectRules(
   const rules = loadRules(databaseId);
   if (rules.length === 0) return [];
 
-  const cfg = selectionConfig();
+  const cfg = loadConfig().rules;
 
   let key: string;
   try {
@@ -188,7 +164,15 @@ export async function selectRules(
   for (const [name, prob] of ranked) {
     const r = byName.get(name);
     if (!r) continue;
-    out.push({ name: r.name, description: r.description, content: r.content, prob });
+    out.push({ name: r.name, description: r.description, content: r.content, tools: ruleTools(r), prob });
   }
   return out;
+}
+
+/** The rule's tool references: structured when present, else derived once from
+ *  the legacy `## Tools needed` markdown (read-time migration — no write). */
+function ruleTools(r: { content: string; tools?: { name: string; role?: string }[] }): { name: string; role?: string }[] | undefined {
+  if (r.tools && r.tools.length > 0) return r.tools;
+  const legacy = declaredTools(r.content);
+  return legacy.length > 0 ? legacy.map((n) => ({ name: n })) : undefined;
 }

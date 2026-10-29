@@ -5,9 +5,9 @@
  * executing; false when the plan stays paused (wrong reply, or blocked).
  */
 
-import { isApproval } from "../vers_9/orchestrator";
+import { isApproval } from "./util";
 import { persistPlan } from "./executePlan";
-import type { OrchestratorIO } from "../vers_9/orchestrator";
+import type { OrchestratorIO } from "./types";
 import type { TurnPlan } from "./types";
 
 export async function resumePlan(opts: {

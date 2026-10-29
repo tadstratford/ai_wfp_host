@@ -448,9 +448,13 @@ function decodeRowPayload(row: WorkspaceRow, secret: string | null): SectionPayl
 /** True if the stored metadata section is an encrypted envelope (vs plaintext). */
 export async function isWorkspaceEncrypted(workspaceId: string): Promise<boolean> {
   if (EDITION === "local") return false;
-  const row = await loadEncryptedRow(workspaceId);
-  if (!row) return false;
-  return isEncryptedSectionEnvelope(row.enc_metadata);
+  const result = await db.selectOne<{ enc_metadata: string | null }>(
+    TABLE,
+    { workspace_id: workspaceId },
+    "enc_metadata",
+  );
+  if (result.error || !result.data) return false;
+  return isEncryptedSectionEnvelope(result.data.enc_metadata ?? "");
 }
 
 export async function deleteWorkspace(workspaceId: string): Promise<void> {

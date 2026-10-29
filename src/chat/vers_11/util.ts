@@ -2,6 +2,12 @@
  * Small shared helpers for the vers_11 orchestrator harness.
  */
 
+/** True when a free-text reply is an affirmative approval of a paused gate. */
+export function isApproval(raw: string): boolean {
+  const t = raw.trim().toLowerCase().replace(/[.!?]+$/, "");
+  return ["approve", "approved", "confirm", "confirmed", "yes", "yep", "yeah", "go ahead", "proceed", "do it", "post it"].includes(t);
+}
+
 /** Race a promise against a timeout so a hung model/tool call surfaces as an
  *  error instead of silently stalling the turn. */
 export async function withTimeout<T>(

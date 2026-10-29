@@ -90,6 +90,7 @@ export function loadAppSkills(databaseId?: string): SkillWithSource[] {
           scope: (parsed.scope as SkillScope) || undefined,
           tags: parsed.tags || [],
           content: parsed.content,
+          tools: parsed.tools,
           source: "app",
         });
       } catch {
@@ -106,7 +107,8 @@ export function loadAppSkills(databaseId?: string): SkillWithSource[] {
   });
 }
 
-/** Extract the tool names declared in a skill's `## Tools needed` section. */
+/** Extract the tool names declared in a skill's `## Tools needed` section. Used
+ *  only for legacy migration — new skills declare tools in frontmatter. */
 export function declaredTools(content: string): string[] {
   const section = content.match(/## Tools needed\s*\n([\s\S]*?)(?=\n## |\s*$)/);
   if (!section) return [];
@@ -141,6 +143,7 @@ function parseFrontmatter(raw: string): {
   description?: string;
   scope?: string;
   tags?: string[];
+  tools?: { name: string; role?: string }[];
   content: string;
 } {
   const fmMatch = raw.match(/^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/);
@@ -156,7 +159,13 @@ function parseFrontmatter(raw: string): {
     const m = line.match(/^(\w+)\s*:\s*(.+)$/);
     if (m) {
       const key = m[1].trim();
-      let value: any = m[2].trim();
+      const rawValue = m[2].trim();
+      if (key === "tools") {
+        // Structured JSON — keep the raw JSON string for parseTools.
+        result[key] = rawValue;
+        continue;
+      }
+      let value: any = rawValue;
       if (value.startsWith("[") && value.endsWith("]")) {
         value = value
           .slice(1, -1)
@@ -172,6 +181,30 @@ function parseFrontmatter(raw: string): {
     description: result.description,
     scope: result.scope,
     tags: result.tags,
+    tools: parseTools(result.tools),
     content,
   };
+}
+
+/** Parse a frontmatter `tools:` value into structured `{ name, role? }[]`.
+ *  Accepts a JSON array (single line). Invalid input → undefined (no tools),
+ *  so a malformed declaration fails safe and is caught by validation-on-open. */
+function parseTools(value: unknown): { name: string; role?: string }[] | undefined {
+  if (typeof value !== "string") return undefined;
+  try {
+    const arr = JSON.parse(value);
+    if (!Array.isArray(arr)) return undefined;
+    const out: { name: string; role?: string }[] = [];
+    for (const item of arr) {
+      if (item && typeof item === "object" && typeof (item as any).name === "string") {
+        out.push({
+          name: (item as any).name,
+          ...(typeof (item as any).role === "string" ? { role: (item as any).role } : {}),
+        });
+      }
+    }
+    return out;
+  } catch {
+    return undefined;
+  }
 }

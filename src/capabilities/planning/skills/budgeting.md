@@ -1,6 +1,7 @@
 ---
 name: budgeting
 description: Build and report on a lean budget-vs-actual plan at "reporting account" grain — actuals, budget, and forecast in the workspace planning store.
+tools: [{"name":"qbo_accounts_list","role":"QBO account names, types, and Ids"},{"name":"qbo_actuals_flat","role":"monthly QBO actuals feed"},{"name":"plan_dim_upsert","role":"write the reporting-account dimension"},{"name":"plan_dim_get","role":"read the reporting-account dimension"},{"name":"plan_facts_upsert","role":"write fact rows"},{"name":"plan_facts_get","role":"read fact rows"},{"name":"plan_budget_load","role":"load an uploaded Excel/CSV budget"},{"name":"plan_actuals_load","role":"roll QBO actuals into line-level actuals"},{"name":"plan_variance","role":"budget-vs-actual rows as JSON"},{"name":"plan_blend","role":"build the latest estimate"},{"name":"plan_forecast","role":"deterministic cash forecast"},{"name":"report_plan_variance","role":"budget-vs-actual HTML report"},{"name":"report_plan_cash_forecast","role":"cash-forecast HTML report"},{"name":"chat_download","role":"deliver the finished HTML report"},{"name":"save_data","role":"carry data between steps"},{"name":"get_data","role":"carry data between steps"},{"name":"set_param","role":"carry data between steps"},{"name":"get_param","role":"carry data between steps"},{"name":"show_message","role":"present findings"}]
 ---
 
 ## Instructions
@@ -10,17 +11,3 @@ description: Build and report on a lean budget-vs-actual plan at "reporting acco
 4. **Enter budget / forecast.** To load an uploaded Excel/CSV budget, call `plan_budget_load(source, version, fiscal_year)` — it maps each row's `Account` column to `account` and its Jan..Dec columns to `per_1..per_12`, then writes the version (e.g. `budget1`). For a hand-built forecast (or any version not in a spreadsheet), use `plan_facts_upsert` with fact rows. For "actuals through May, then forecast the rest of the year", call `plan_forecast(fy, cutover_per, balances)` — it deterministically writes the `Forecast` and `Latest estimate` versions.
 5. **Report.** For a deliverable, render the variance deterministically with `report_plan_variance(fy, base, compare, ...)` → `chat_download(data="{{result}}", filename="budget-variance.html")` — a brand-styled HTML report grouped by Income/Expense/Balance with per-line drill-down to monthly Actual vs Budget detail. For a quick inline summary only, `plan_variance` returns the same rows as JSON to render as a markdown table. Flow accounts sum over the period range; balance accounts (cash) use the through period; Net Income is computed. Default `through` is the last period with actuals, so YTD compares apples-to-apples.
 6. Cash is a `balance` line, not a flow — pull month-end bank balances from `qbo_balance_sheet` (or a trial balance filtered to Bank), then call `plan_forecast(fy, cutover_per, balances)` to write the `Forecast` and `Latest estimate` versions deterministically.
-
-## Tools needed
-- `qbo_accounts_list`, `qbo_actuals_flat` — QBO account feed (names + Ids, monthly actuals)
-- `plan_dim_upsert`, `plan_dim_get` — reporting-account dimension + mapping
-- `plan_facts_upsert`, `plan_facts_get` — write/read facts (all versions)
-- `plan_budget_load` — load an uploaded Excel/CSV budget into a version
-- `plan_actuals_load` — roll QBO actuals into line-level `actuals`
-- `plan_variance`, `plan_blend` — budget-vs-actual report + "Latest estimate"
-- `plan_forecast` — deterministic cash forecast (`Forecast` + `Latest estimate` versions)
-- `report_plan_variance` — deterministic budget-vs-actual HTML report (pair with `chat_download`)
-- `report_plan_cash_forecast` — deterministic cash-forecast HTML report (pair with `chat_download`)
-- `chat_download` — deliver the finished self-contained HTML report
-- `save_data`, `get_data`, `set_param`, `get_param` — carry data between steps
-- `show_message` — present findings to the user

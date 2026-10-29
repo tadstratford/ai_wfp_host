@@ -27,7 +27,14 @@ The draft is a skill with these fields:
 - `description` — one sentence: what this rule/method is.
 - `scope` — where it applies: `"chat"`, `"workflow"`, or `"chat+workflow"`. Default to `"chat+workflow"` so it applies everywhere.
 - `tags` — a few short lowercase tags, e.g. `["reporting", "formatting"]`. Use `[]` when unknown.
-- `content` — the markdown body. It must have a `## Instructions` section (numbered steps), a `## Tools needed` section when relevant, and a `## Rules` section (guardrails — things that are always computed, never guessed, and failure conditions).
+- `content` — the markdown body. It must have a `## Instructions` section (numbered steps) and a `## Rules` section (guardrails — things that are always computed, never guessed, and failure conditions).
+- `tools` — a structured array of the tools the method uses. Each entry is `{"name": "<tool_id>", "role": "<what it does in one short phrase>"}`. ONLY use tool names from the available tools list below — never invent a tool name. Leave `[]` when the method uses no specific tools.
+
+## Available tools
+
+Use only these tool ids in the `tools` array:
+
+{{TOOLS}}
 
 Record the user's rules and preferences faithfully. Do not fabricate specifics the user never gave. Update every field you can from the latest answer, and carry forward whatever was already there.
 
@@ -52,7 +59,8 @@ Return ONLY a JSON object — no preamble, no markdown fences:
     "description": "string",
     "scope": "chat+workflow",
     "tags": ["string"],
-    "content": "string (markdown body)"
+    "content": "string (markdown body)",
+    "tools": [{"name": "string", "role": "string"}]
   }
 }
 ```

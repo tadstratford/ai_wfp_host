@@ -30,4 +30,13 @@ describe("classifyRule", () => {
     expect(c.tier).toBe("audit");
     expect(c.tool).toBeUndefined();
   });
+
+  it("classifies a capability-tool (method) rule as audit, never split_data", () => {
+    const c = classifyRule(rule(
+      "shared-services-allocation",
+      "Compute the split with `qbodemo_allocation_compute` and post with `qbodemo_journal_create`.",
+    ));
+    expect(c.tier).toBe("audit");
+    expect(c.tool).toBeUndefined();
+  });
 });

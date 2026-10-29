@@ -55,9 +55,13 @@ export function isAllowedFromCustomCode(name: string): boolean {
   return c === "read" || c === "constructive-write";
 }
 
-/** True when invoking this tool requires the chat write-approval gate. */
+/** True when invoking this tool requires the chat write-approval gate. A tool is
+ *  mutating when it declares the flag, or when its policy class is destructive
+ *  (a delete/post is always a write even if the flag was omitted). */
 export function isMutatingTool(name: string): boolean {
-  return tools.get(name)?.mutating === true;
+  const t = tools.get(name);
+  if (!t) return false;
+  return t.mutating === true || t.class === "destructive-write";
 }
 
 /** True when this tool's invocation is a durable, reusable workflow step. */

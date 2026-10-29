@@ -1,6 +1,7 @@
 ---
 name: qbo-audit
 description: Audit QuickBooks Online journal entries against deterministic and LLM-judged rules. Connect to QBO, fetch journals, evaluate each rule, and produce pass/fail verdicts per entry.
+tools: [{"name":"qbo_journal_entries","role":"fetch QBO journal entries"},{"name":"set_param","role":"store results"},{"name":"get_param","role":"retrieve results"},{"name":"show_message","role":"display findings"}]
 ---
 
 ## Instructions
@@ -11,10 +12,6 @@ description: Audit QuickBooks Online journal entries against deterministic and L
    - `audit` rules require LLM judgment. For entries that pass all deterministic rules but need audit-rule evaluation, use your own judgment based on the entry's description, accounts, and amounts.
 4. Track results — record a pass/fail verdict per entry with a specific signal (what failed) and remedy (what to do).
 5. Summarize findings — present pass/fail counts grouped by rule, list failed entries with their signals and remedies, and suggest next actions.
-
-## Tools needed
-- `qbo_journal_entries` — QBO data access
-- `set_param`, `get_param`, `show_message` — store results, display findings
 
 ## Rules
 - [deterministic] Every journal entry has at least 2 lines.

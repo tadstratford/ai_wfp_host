@@ -97,7 +97,6 @@ function headers(extra?: Record<string, string>): Record<string, string> {
         "apikey": key,
         "Authorization": `Bearer ${key}`,
         "Content-Type": "application/json",
-        "Prefer": "return=representation",
         ...extra,
     };
 }
@@ -210,7 +209,7 @@ export async function upsert<T = any>(
     try {
         const res = await fetchWithRetry(restUrl(table), {
             method: "POST",
-            headers: headers({ "Prefer": "resolution=merge-duplicates,return=representation" }),
+            headers: headers({ "Prefer": "resolution=merge-duplicates" }),
             body: JSON.stringify(data),
         });
         if (!res.ok) {

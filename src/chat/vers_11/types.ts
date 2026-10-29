@@ -13,12 +13,28 @@
  */
 
 import type { AddMessageArgs } from "@backend/types/chat";
+import type { ToolRef } from "wfp-format/rule";
+
+/** The IO surface the orchestrator uses to talk to the session layer — messages,
+ *  errors, and the workspace/session ids. Defined here (not imported from a
+ *  removed version) so vers_11 stays self-contained. */
+export interface OrchestratorIO {
+  databaseId: string;
+  userId: string;
+  sessionId: string;
+  workflowId?: string;
+  addMessage: (msg: AddMessageArgs) => Promise<void>;
+  addError: (title: string, detail?: string) => Promise<void>;
+  mode: string;
+}
 
 export interface SelectedRule {
   name: string;
   description?: string;
   /** Full markdown body — loaded only after selection, never in the routing prompt. */
   content: string;
+  /** Structured tool references (authoritative; not parsed from content). */
+  tools?: ToolRef[];
   /** Relevance score from the description-level Jev choice (0..1). */
   prob: number;
 }

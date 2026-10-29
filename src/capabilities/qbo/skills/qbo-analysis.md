@@ -1,6 +1,7 @@
 ---
 name: qbo-analysis
 description: Analyze QuickBooks Online data — check connection, review chart of accounts, and run targeted accounting analyses.
+tools: [{"name":"qbo_accounts_list","role":"account discovery"},{"name":"qbo_items_list","role":"products & services lookup"},{"name":"qbo_classes_list","role":"class lookup"},{"name":"report_qbo_pnl","role":"Profit & Loss HTML report"},{"name":"report_qbo_bs","role":"Balance Sheet HTML report"},{"name":"qbo_pnl_report","role":"P&L raw rows for inline markdown"},{"name":"qbo_balance_sheet","role":"Balance Sheet raw rows for inline markdown"},{"name":"qbo_gl_review","role":"GL misclassification review"},{"name":"qbo_ar_ap","role":"receivables/payables aging"},{"name":"qbo_duplicates","role":"duplicate detection"},{"name":"qbo_recurring_check","role":"recurring expense gaps"},{"name":"qbo_uncategorized","role":"uncategorized entries"},{"name":"chat_download","role":"deliver the finished report file"},{"name":"set_param","role":"store typed results"},{"name":"get_param","role":"retrieve typed results"},{"name":"show_message","role":"present findings"}]
 ---
 
 ## Instructions
@@ -18,16 +19,3 @@ description: Analyze QuickBooks Online data — check connection, review chart o
    - For recurring expense gaps: `qbo_recurring_check`
    - For uncategorized entries: `qbo_uncategorized`
 6. Summarize findings with specific account names, amounts, and recommended actions. Render tables inline as markdown — only use `chat_download` when the user explicitly asks for a file, and only use `set_param` when the result is large or needs to be referenced across turns.
-
-## Tools needed
-- `qbo_accounts_list` — account discovery
-- `qbo_items_list` — products & services (Item) lookup when a name isn't a GL account
-- `qbo_classes_list` — class lookup
-- `report_qbo_pnl` — Profit & Loss (income statement) as a native-QBO-style HTML report (pair with `chat_download`)
-- `report_qbo_bs` — Balance Sheet as a native-QBO-style HTML report (pair with `chat_download`)
-- `qbo_pnl_report` — Profit & Loss raw rows (for quick inline markdown summaries, incl. month-by-month)
-- `qbo_balance_sheet` — Balance Sheet raw rows (for quick inline markdown summaries)
-- `qbo_gl_review`, `qbo_ar_ap`, `qbo_duplicates`, `qbo_recurring_check`, `qbo_uncategorized` — targeted analyses
-- `chat_download` — deliver the finished report file
-- `set_param`, `get_param` — store and retrieve typed results
-- `show_message` — present findings to the user

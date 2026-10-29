@@ -12,7 +12,6 @@
 import { aggregator } from "./aggregator";
 import { resultContract, type ResultContract } from "./outputs";
 import { loadAppSkills, declaredTools } from "../core/skills/loader";
-
 export interface CapabilityTool {
   name: string;
   server: string;
@@ -57,7 +56,7 @@ export async function getCapabilityIndex(): Promise<CapabilityIndex> {
     skillMap.set(s.name, {
       name: s.name,
       description: s.description || "",
-      tools: declaredTools(s.content),
+      tools: s.tools?.map((t) => t.name) ?? declaredTools(s.content),
     });
   }
 

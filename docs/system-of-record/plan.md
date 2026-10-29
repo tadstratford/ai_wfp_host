@@ -225,6 +225,11 @@ placed **before** the write-approval gate — a flagged rule blocks the write.
       relays it. `list_data` returns markdown and is relayed verbatim;
       `get_data` returns structured JSON (kept JSON for the LLM/workflow
       consumers), which the executor formats via `renderGetDataResult`.
+- [x] **Structured rule tool references** — `Rule`/`Skill` gain `tools?: {name, role}[]`
+      (JSON, no regex). Skills declare `tools:` in frontmatter; rules declare it via
+      `create_rule`/`update_rule` and the rule builder. `vers_11` reads `rule.tools`
+      directly (legacy `## Tools needed` is derived once at read time). Validated on
+      workspace open (`src/rules/validate.ts`) and surfaced as a Rules-panel badge.
 - [ ] **Jev result verification** — reuse `vers_9/verify.ts` (`verifyResult` /
       `verifyPlan`) as a post-plan gate; the deterministic review + rule-report are
       currently the trust artifact.

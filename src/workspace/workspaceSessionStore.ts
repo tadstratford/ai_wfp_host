@@ -7,6 +7,7 @@
 
 import type { WfpFile } from "wfp-format";
 import { WorkspaceSession } from "./WorkspaceSession";
+import { refreshRuleIssues } from "@rules/validate";
 
 const IDLE_TIMEOUT_MS = envInt("IDLE_TIMEOUT_MS", 15 * 60 * 1000);
 const SWEEP_INTERVAL_MS = envInt("SWEEP_INTERVAL_MS", 60 * 1000);
@@ -142,6 +143,14 @@ export async function openWorkspaceSession(
   sessionsByUser.set(args.userId, session);
   indexDatabaseId(session);
   ensureSweeper();
+
+  // Validate the workspace's rules (structured tool references) so a broken rule
+  // is surfaced early rather than failing silently in a later chat plan.
+  if (session.databaseId) {
+    refreshRuleIssues(session.databaseId, session.getRules()).catch((err: any) => {
+      console.warn(`[WorkspaceSession] rule validation failed: ${err.message}`);
+    });
+  }
 
   return session;
 }

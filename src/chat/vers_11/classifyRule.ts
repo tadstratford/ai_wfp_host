@@ -1,15 +1,19 @@
 /**
- * classifyRule — auto-classify a rule's enforcement tier by keyword-matching its
- * text against the deterministic/classified tool families.
+ * classifyRule — assign a rule's enforcement tier.
  *
- * Pure (no model, no tool-catalog lookup): the mapping is a keyword → tool-name
- * table. The tool names are the deterministic data tools that already implement
- * the check (reconcile_relationship, aggregate_data, split_data, profile_data)
- * and the Jev-backed classifier (check_data). A rule that matches none of these
- * falls back to `audit` — an LLM review that is reported as "not proven".
+ * Two rules of thumb, deterministic-first:
+ *   1. A rule that references capability tools (`qbo_*` / `qbodemo_*`) is a
+ *      *method/instruction* rule, not a generic data check — it is never forced
+ *      into `split_data`/`check_data`; it falls to `audit` ("not proven").
+ *   2. Otherwise the rule's `## Rules` section (the enforcement constraints)
+ *      is keyword-matched to the deterministic/classified data-tool families.
+ *
+ * Pure (no model): the map is a keyword → tool table. A rule matching none falls
+ * back to `audit` — an LLM review reported as "not proven".
  */
 
 import type { ClassifiedRule, RuleTier, SelectedRule } from "./types";
+import { parseRule, referencesCapabilityTools } from "./ruleParse";
 
 interface ToolMatcher {
   tool: string;
@@ -28,7 +32,17 @@ const CLASSIFIED: ToolMatcher[] = [
 ];
 
 export function classifyRule(rule: SelectedRule): ClassifiedRule {
-  const text = `${rule.name} ${rule.description ?? ""} ${rule.content}`.toLowerCase();
+  // Method/instruction rules reference capability tools — not a data check.
+  if (referencesCapabilityTools(rule.content)) {
+    return { rule, tier: "audit" as RuleTier, reason: "references capability tools (method rule, not a data check)" };
+  }
+
+  // Classify the enforcement section (## Rules); fall back to the whole body.
+  const parsed = parseRule(rule.content);
+  const text = (parsed.rules.length > 0
+    ? parsed.rules.join(" ")
+    : `${rule.name} ${rule.description ?? ""} ${rule.content}`
+  ).toLowerCase();
 
   for (const { tool, re } of DETERMINISTIC) {
     if (re.test(text)) {

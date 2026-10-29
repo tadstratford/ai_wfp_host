@@ -17,26 +17,21 @@ import { aggregator } from "../../mcp/aggregator";
 import { resolveTemplates, setParameterValue } from "@backend/core/settings/parameterHelpers";
 import { getSession, updateSession } from "@backend/core/session/sessions/session_all";
 import { getCapabilityIndex } from "@mcp/capabilityIndex";
-import { isPresentableTool } from "../../capabilities/registry";
-import { getPlanner } from "../plan/planner";
-import type { PlanRequest } from "../plan/planner";
-import { COMPOSABLE_PRIMITIVES } from "../plan/primitives";
+import { isPresentableTool, isMutatingTool } from "../../capabilities/registry";
+import { getPlanner } from "./plan/planner";
+import type { PlanRequest } from "./plan/planner";
+import { COMPOSABLE_PRIMITIVES } from "./plan/primitives";
 import { withTimeout } from "./util";
-import type { OrchestratorIO } from "../vers_9/orchestrator";
-import { buildReview, renderReviewReport, reconcileReviewEvidence } from "../vers_9/orchestrator";
+import type { OrchestratorIO } from "./types";
+import { buildReview, renderReviewReport, reconcileReviewEvidence } from "./review";
+import { loadConfig } from "./config";
+import { verifyResultLlm, shouldVerify, verdictPasses } from "./verify";
 import type { DataStep, EvidenceItem, RuleTier, TurnPlan } from "./types";
 
 const VERIFIABLE_TOOLS = new Set([
   "aggregate_data", "check_data", "judge_data", "compare_data",
   "reconcile_relationship", "profile_data", "classify_data", "split_data",
 ]);
-
-/** At most one automatic re-plan pass per turn — bounds cost and prevents a
- *  retry loop; anything still failing after that is surfaced to the user. */
-const MAX_REPLANS = 1;
-
-/** Tool-call timeout — a hung tool surfaces as an error instead of stalling. */
-const TOOL_TIMEOUT_MS = 120_000;
 
 function extractTextContent(mcpResult: any): string {
   if (mcpResult?.content && Array.isArray(mcpResult.content)) {
@@ -276,6 +271,9 @@ export async function executePlan(opts: {
   let rendered = false;
   let finalDataTool: string | null = null;
   let finalDataText: string | null = null;
+  let lastMutatingTool: string | null = null;
+  let lastMutatingText: string | null = null;
+  let replyMarkdown = "";
 
   for (let replans = 0; ; replans++) {
     while (plan.cursor < plan.steps.length) {
@@ -327,16 +325,22 @@ export async function executePlan(opts: {
         const resolved = resolveTemplates(step.args, session.parameters, io.databaseId) as Record<string, unknown>;
         const mcpResult = await withTimeout(
           aggregator.callTool(step.tool, resolved),
-          TOOL_TIMEOUT_MS,
+          loadConfig().loop.toolTimeoutMs,
           `tool ${step.tool}`,
         );
         const full = extractTextContent(mcpResult);
-        if (VERIFIABLE_TOOLS.has(step.tool)) evidence.push({ tool: step.tool, summary: full.slice(0, 2500) });
+        if (VERIFIABLE_TOOLS.has(step.tool) || isMutatingTool(step.tool)) {
+          evidence.push({ tool: step.tool, summary: full.slice(0, 2500) });
+        }
         toolsUsed.push(step.tool);
         const resultValue = parseToolOutput(full);
         if (step.tool === "list_relationships") relationshipsOutput = resultValue;
         finalDataTool = step.tool;
         finalDataText = full;
+        if (isMutatingTool(step.tool)) {
+          lastMutatingTool = step.tool;
+          lastMutatingText = full;
+        }
         if (step.tool === "show_message" || step.tool === "chat_download") rendered = true;
         session.parameters = setParameterValue(session.parameters, "result", {
           _meta: { type: "text" },
@@ -360,7 +364,7 @@ export async function executePlan(opts: {
     const failed = plan.steps.filter(
       (s): s is DataStep => s.kind === "data" && !s.ruleCheck && s.status === "error",
     );
-    if (failed.length === 0 || replans >= MAX_REPLANS) break;
+    if (failed.length === 0 || replans >= loadConfig().loop.maxReplans) break;
     await io.addMessage({
       markdown: `> _Re-planning ${failed.length} failed step${failed.length === 1 ? "" : "s"}…_`,
       json: { kind: "meta", phase: "replan" },
@@ -383,12 +387,14 @@ export async function executePlan(opts: {
     const reviewEvidence = reconciled.evidence;
     const built = buildReview(reviewEvidence, relationshipsOutput, opts.rawMessage);
     if (built) {
+      replyMarkdown = built.receipts;
       await io.addMessage({
         markdown: built.receipts,
         json: { kind: "review", review: built.payload, skills: plan.provenance.skills },
       });
     } else {
       const fallback = renderReviewReport(reviewEvidence, relationshipsOutput, opts.rawMessage);
+      replyMarkdown = fallback;
       await io.addMessage({ markdown: fallback, json: { kind: "reply", skills: plan.provenance.skills } });
     }
     if (reconciled.pendingClarify.length > 0) {
@@ -405,19 +411,74 @@ export async function executePlan(opts: {
   const ruleReport = renderRuleReport(plan);
   if (ruleReport) {
     rendered = true;
+    replyMarkdown = replyMarkdown ? `${replyMarkdown}\n\n${ruleReport}` : ruleReport;
     await io.addMessage({ markdown: ruleReport, json: { kind: "rule-check" } });
   }
 
-  // Present the turn's result when nothing else already did (no communication
-  // step, no review, no rule report, no download/show_message) and the final
-  // data step's tool declares its result presentable (`present`).
-  if (!rendered && !opts.reviewShaped && finalDataTool && finalDataText != null) {
-    if (isPresentableTool(finalDataTool)) {
-      const markdown = finalDataTool === "get_data" ? renderGetDataResult(finalDataText) : finalDataText;
+  const mutating = plan.steps.some((s) => s.kind === "data" && isMutatingTool(s.tool));
+
+  // Present the turn's result when nothing else already did (no review, no rule
+  // report) and the final data step's tool declares its result presentable
+  // (`present`) — or the turn performed a write (mutating), whose outcome must be
+  // surfaced and verified. A write is relayed even when an earlier show_message
+  // already previewed the work, so the confirmation isn't silently dropped.
+  if (!opts.reviewShaped && !replyMarkdown && (!rendered || mutating) && finalDataTool && finalDataText != null) {
+    if (isPresentableTool(finalDataTool) || mutating) {
+      const sourceTool = mutating && lastMutatingTool ? lastMutatingTool : finalDataTool;
+      const sourceText = mutating && lastMutatingText != null ? lastMutatingText : finalDataText;
+      let markdown: string;
+      if (sourceTool === "get_data") markdown = renderGetDataResult(sourceText);
+      else if (mutating) markdown = `✓ \`${sourceTool}\` completed:\n\n\`\`\`json\n${sourceText}\n\`\`\``;
+      else markdown = sourceText;
+      replyMarkdown = markdown;
       await io.addMessage({
         markdown,
         json: { kind: "reply", skills: plan.provenance.skills },
       });
+    }
+  }
+
+  // ── Verification — LLM checks the reply against the computed evidence ─────
+  if (shouldVerify({ reviewShaped: opts.reviewShaped, mutating, hasLlmAuthored: false })) {
+    const verdict = await verifyResultLlm({
+      databaseId: io.databaseId,
+      userId: io.userId,
+      rawMessage: opts.rawMessage,
+      reply: replyMarkdown,
+      toolsUsed,
+      evidence,
+    });
+    if (verdict === null) {
+      await io.addMessage({
+        markdown: "⚠ Result verification could not run.",
+        json: { kind: "verify", unavailable: true },
+      });
+    } else if (verdictPasses(verdict)) {
+      await io.addMessage({
+        markdown:
+          `✓ Verified — satisfies ${verdict.satisfies.toFixed(2)}, complete ${verdict.complete.toFixed(2)}, ` +
+          `accurate ${verdict.accurate.toFixed(2)}, thorough ${verdict.thorough.toFixed(2)}`,
+        json: { kind: "verify", ...verdict },
+      });
+    } else {
+      const issues = (verdict.issues ?? []).map((i) => `- ${i}`).join("\n");
+      await io.addMessage({
+        markdown:
+          `⚠ Flagged for review${verdict.reason ? `: ${verdict.reason}` : ""}${issues ? `\n${issues}` : ""}`,
+        json: { kind: "verify", ...verdict },
+      });
+      // Persist the gap so a follow-up can address it.
+      try {
+        const fresh = await getSession(io.databaseId, io.sessionId);
+        if (fresh) {
+          await updateSession(io.databaseId, io.sessionId, "metadata", {
+            ...(fresh.metadata ?? {}),
+            pendingVerify: { rawMessage: opts.rawMessage, reason: verdict.reason, issues: verdict.issues },
+          });
+        }
+      } catch (err: any) {
+        console.error("[vers_11] persist pendingVerify failed:", err.message);
+      }
     }
   }
 

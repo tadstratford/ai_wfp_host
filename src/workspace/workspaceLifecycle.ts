@@ -31,7 +31,7 @@ import {
   getWorkspaceMeta as storeGetMeta,
   openWorkspace as storeOpen,
   saveWorkspace as storeSave,
-  listWorkspacesDetailed,
+  listWorkspaces,
   WorkspaceOpenError,
   type WorkspaceListItem,
 } from "./workspaceStore";
@@ -484,7 +484,7 @@ export async function openDiskWorkspace(
   const baseName = wfp.metadata.workspace?.trim() || "Workspace";
   let importName = baseName;
   try {
-    const existingNames = new Set((await listWorkspacesDetailed(args.userId)).map((w) => w.name));
+    const existingNames = new Set((await listWorkspaces(args.userId)).map((w) => w.name));
     if (existingNames.has(importName)) {
       let n = 2;
       while (existingNames.has(`${baseName} (${n})`)) n++;

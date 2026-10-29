@@ -17,6 +17,7 @@ import { loadPrivacyMap } from "@backend/core/knowledge/index";
 import { maskText, discoverRequestValues } from "@backend/core/knowledge/autoMask";
 import { getSessionByDatabaseId } from "@backend/core/workspace/workspaceSessionStore";
 import type { ClassifiedRule, DataStep, DowngradedRule } from "./types";
+import { loadConfig } from "./config";
 
 const CheckSchema = z.object({
   checks: z.array(
@@ -75,7 +76,7 @@ export async function composeRuleChecks(opts: {
       system: CHECK_SYSTEM,
       userMessage: `Rules:\n${catalog}\n\nLoaded data files: ${dataNames.join(", ") || "(none)"}\n\nRequest: ${masked}`,
       maxTokens: 2000,
-      temperature: 0,
+      temperature: loadConfig().llm.temperature,
       callOpts: { userId: opts.userId, mode: "chat", phase: "rule-check" },
     });
   } catch (err: any) {
@@ -93,7 +94,7 @@ export async function composeRuleChecks(opts: {
   const byName = new Map(checkable.map((c) => [c.rule.name, c]));
   const steps: DataStep[] = [];
   const downgraded: DowngradedRule[] = [];
-  const emitted = new Set<string>();
+  const handled = new Set<string>();
 
   for (const check of parsed.checks) {
     const c = byName.get(check.rule);
@@ -102,9 +103,10 @@ export async function composeRuleChecks(opts: {
     const missing = params.filter((p) => p.required && check.args[p.name] === undefined).map((p) => p.name);
     if (missing.length > 0) {
       downgraded.push({ rule: c.rule, reason: `missing ${check.tool}.${missing.join(",")}` });
+      handled.add(c.rule.name);
       continue;
     }
-    emitted.add(c.rule.name);
+    handled.add(c.rule.name);
     steps.push({
       kind: "data",
       tool: check.tool,
@@ -117,8 +119,10 @@ export async function composeRuleChecks(opts: {
     });
   }
 
+  // Only rules with no emitted *or* missing-arg check get the generic downgrade —
+  // one disclosure per rule, never "missing X" AND "no check emitted" together.
   for (const c of checkable) {
-    if (!emitted.has(c.rule.name)) {
+    if (!handled.has(c.rule.name)) {
       downgraded.push({ rule: c.rule, reason: "no check emitted" });
     }
   }

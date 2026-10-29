@@ -3,6 +3,7 @@ import type { User } from "@backend/types";
 import { getSessionByDatabaseId } from "@backend/core/workspace/workspaceSessionStore";
 import type { Rule } from "wfp-format/rule";
 import { markdownToHtml } from "@backend/utilities/markdownToHtml";
+import { validateRules } from "@rules/validate";
 
 export const rulesPanelView = async (c: Context) => {
   const user = c.get("user") as User;
@@ -10,6 +11,7 @@ export const rulesPanelView = async (c: Context) => {
 
   const ws = databaseId ? getSessionByDatabaseId(databaseId) : null;
   const rules = ws ? ws.getRules() : [];
+  const issues = await validateRules(rules);
 
   return c.html(
     <div class="max-w-3xl mx-auto px-4 py-6 md:px-8 md:py-8">
@@ -47,6 +49,19 @@ export const rulesPanelView = async (c: Context) => {
           </label>
         </div>
       </div>
+
+      {issues.length > 0 && (
+        <div class="rounded-xl border border-amber-200 bg-amber-50/70 dark:border-amber-800 dark:bg-amber-900/20 p-4 mb-4">
+          <div class="text-sm font-semibold text-amber-700 dark:text-amber-300 mb-1">
+            {issues.length} rule{issues.length === 1 ? " references" : "s reference"} an unknown tool
+          </div>
+          <ul class="text-xs text-amber-700 dark:text-amber-300/90 space-y-0.5">
+            {issues.map((i) => (
+              <li><code>{i.rule}</code> → <code>{i.tool}</code></li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {rules.length === 0 ? (
         <div class="text-center py-12 text-ink-400 dark:text-ink-500">
@@ -142,6 +157,13 @@ export const rulesDetailView = async (c: Context) => {
               class="w-full px-3 py-2 text-sm border border-ink/[0.12] dark:border-white/[0.1] rounded-xl bg-[#F3F5F9] dark:bg-ink-800 text-ink dark:text-white font-mono">{rule.content}</textarea>
           </div>
 
+          <div>
+            <label class="block text-xs font-semibold text-ink-600 dark:text-white/70 mb-1">Tools (JSON)</label>
+            <textarea name="tools" rows={6} placeholder='[{"name":"tool_id","role":"what it does"}]'
+              class="w-full px-3 py-2 text-sm border border-ink/[0.12] dark:border-white/[0.1] rounded-xl bg-[#F3F5F9] dark:bg-ink-800 text-ink dark:text-white font-mono">{JSON.stringify(rule.tools ?? [], null, 2)}</textarea>
+            <p class="text-xs text-ink-400 mt-1">Structured tool references the rule's method uses. Each <code>name</code> must be a real tool.</p>
+          </div>
+
           <div class="flex items-center gap-3">
             <button type="submit" class="rounded-xl bg-brand-500 hover:bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white transition">Save</button>
             <button type="button" hx-get={`/app/rules/${encodeURIComponent(rule.name)}`} hx-target="#main-panel" hx-swap="innerHTML"
@@ -224,6 +246,7 @@ export const rulesSaveHandler = async (c: Context) => {
   const tags = (body.tags as string || "").split(",").map((t) => t.trim()).filter(Boolean);
   const content = (body.content as string || "").trim();
   const originalName = body.original_name as string;
+  const tools = parseToolsJson(body.tools as string | undefined);
 
   if (!name || !content) {
     return c.html(<div class="p-6 text-coral-500">Name and content are required.</div>);
@@ -241,9 +264,28 @@ export const rulesSaveHandler = async (c: Context) => {
     description: description || undefined,
     tags,
     content,
+    ...(tools ? { tools } : {}),
   });
   return rulesPanelView(c);
 };
+
+/** Parse the Tools (JSON) textarea into ToolRef[]; empty/invalid → undefined. */
+function parseToolsJson(raw: string | undefined): { name: string; role?: string }[] | undefined {
+  if (!raw || !raw.trim()) return undefined;
+  try {
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr)) return undefined;
+    const out: { name: string; role?: string }[] = [];
+    for (const item of arr) {
+      if (item && typeof item === "object" && typeof item.name === "string") {
+        out.push({ name: item.name, ...(typeof item.role === "string" ? { role: item.role } : {}) });
+      }
+    }
+    return out.length > 0 ? out : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 export const rulesDeleteHandler = async (c: Context) => {
   const user = c.get("user") as User;

@@ -4,6 +4,7 @@ import { getSessionByDatabaseId } from "@backend/core/workspace/workspaceSession
 import { getLLMConfigByDatabaseId } from "@backend/core/user/getLLMApiKey";
 import { callLLM } from "@backend/core/llm/llm-client";
 import { loadPrompt } from "@chat/prompts/loader";
+import { getCapabilityIndex } from "@mcp/capabilityIndex";
 import { markdownToHtml } from "@backend/utilities/markdownToHtml";
 import { Stepper, WizIcon, FIELD_HEAD, TPL_CARD, ErrCard } from "../workflows/wizardPage";
 
@@ -61,6 +62,7 @@ interface RuleDraft {
   description: string;
   tags: string[];
   content: string;
+  tools: { name: string; role?: string }[];
 }
 
 interface RuleInterviewState {
@@ -72,9 +74,25 @@ interface RuleInterviewState {
   done: boolean;
   llmConfig: { provider: string; model: string; apiKey?: string };
   databaseId: string;
+  toolCatalog?: string;
 }
 
 const ruleInterviews = new Map<string, RuleInterviewState>();
+
+/** A compact "id — one-line description" list of every tool, fed to the
+ *  interviewer so it can reference real tool names in the draft's `tools`. */
+async function buildToolCatalog(): Promise<string> {
+  try {
+    const index = await getCapabilityIndex();
+    const lines = [...index.tools.entries()].map(([name, t]) => {
+      const first = (t.description || "").split("\n")[0]?.trim().slice(0, 120) ?? "";
+      return `- ${name}${first ? `: ${first}` : ""}`;
+    });
+    return lines.join("\n");
+  } catch {
+    return "(no tools available)";
+  }
+}
 
 async function askRuleInterviewer(
   state: RuleInterviewState,
@@ -96,6 +114,7 @@ async function askRuleInterviewer(
       : "The user is starting from scratch (no template).",
     CONVERSATION: conversation,
     DRAFT: JSON.stringify(state.draft, null, 2),
+    TOOLS: state.toolCatalog ?? "(no tools available)",
   });
 
   const messages: { role: "user" | "assistant"; content: string }[] = [];
@@ -120,6 +139,9 @@ async function askRuleInterviewer(
     description: typeof d.draft?.description === "string" ? d.draft.description : state.draft.description,
     tags: Array.isArray(d.draft?.tags) ? d.draft.tags.map(String) : state.draft.tags,
     content: typeof d.draft?.content === "string" ? d.draft.content : state.draft.content,
+    tools: Array.isArray(d.draft?.tools)
+      ? d.draft.tools.filter((t: any) => t && typeof t.name === "string").map((t: any) => ({ name: t.name, ...(typeof t.role === "string" ? { role: t.role } : {}) }))
+      : state.draft.tools,
   };
 
   return {
@@ -364,10 +386,11 @@ const startRuleInterview = async (c: Context) => {
     seed,
     qa: [],
     current: null,
-    draft: { name: "", description: "", tags: [], content: "" },
+    draft: { name: "", description: "", tags: [], content: "", tools: [] },
     done: false,
     llmConfig: { provider: llmConfig.provider, model: llmConfig.model, apiKey: llmConfig.apiKey },
     databaseId,
+    toolCatalog: await buildToolCatalog(),
   };
 
   const id = crypto.randomUUID();
@@ -447,6 +470,19 @@ function RuleReviewView(id: string, state: RuleInterviewState) {
           ))}
         </div>
 
+        {d.tools.length > 0 && (
+          <div class="mb-4">
+            <div class="text-xs font-semibold text-ink-600 dark:text-white/70 mb-1.5">Tools</div>
+            <div class="flex flex-wrap gap-1.5">
+              {d.tools.map((t) => (
+                <span class="pill bg-ink/[0.05] text-ink-600 dark:bg-white/[0.06] dark:text-white/80 text-[11px]" title={t.role}>
+                  <code>{t.name}</code>
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div
           class="prose dark:prose-invert prose-sm max-w-none max-h-[46vh] overflow-y-auto bg-[#F3F5F9] dark:bg-ink-800 rounded-lg p-4"
           dangerouslySetInnerHTML={{ __html: markdownToHtml(d.content) }}
@@ -505,6 +541,7 @@ const saveRuleHandler = async (c: Context) => {
     description: d.description.trim() || undefined,
     tags: d.tags,
     content,
+    ...(d.tools.length > 0 ? { tools: d.tools } : {}),
   });
 
   return c.html(
