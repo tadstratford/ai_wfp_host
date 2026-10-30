@@ -5,13 +5,20 @@
  * Uses SUPABASE_URL and SUPABASE_SERVICE_KEY env vars.
  */
 
-import { EDITION } from "@shared/edition";
+import { EDITION, dbBackend } from "@shared/edition";
+import * as sqlite from "./sqlite";
 
 /** In EDITION=local there is no Supabase — every operation short-circuits with
  *  an error, which callers already degrade on (empty lists, defaults, no-ops). */
 function isOffline(): boolean {
   return EDITION === "local";
 }
+
+/** When DB_BACKEND=sqlite (self-host), delegate to the in-process SQLite
+ *  adapter instead of PostgREST. Same `{ data, error }` contract. */
+const isSqlite = dbBackend() === "sqlite";
+
+export { initDbBackend } from "./sqlite";
 
 const OFFLINE_ERROR = "local mode (no Supabase)";
 
@@ -125,6 +132,7 @@ export async function select<T = any>(
     columns?: string
 ): Promise<SupabaseResult<T[]>> {
     if (isOffline()) return { data: null, error: OFFLINE_ERROR };
+    if (isSqlite) return sqlite.select<T>(table, filters, columns);
     try {
         const query = buildQueryParams(filters, columns || "*");
         const res = await fetchWithRetry(restUrl(table, query), {
@@ -151,6 +159,7 @@ export async function selectOne<T = any>(
     columns?: string
 ): Promise<SupabaseResult<T>> {
     if (isOffline()) return { data: null, error: OFFLINE_ERROR };
+    if (isSqlite) return sqlite.selectOne<T>(table, filters, columns);
     try {
         const query = buildQueryParams(filters, columns || "*");
         const res = await fetchWithRetry(restUrl(table, query), {
@@ -180,6 +189,7 @@ export async function insert<T = any>(
     data: Record<string, any> | Record<string, any>[]
 ): Promise<SupabaseResult<T[]>> {
     if (isOffline()) return { data: null, error: OFFLINE_ERROR };
+    if (isSqlite) return sqlite.insert<T>(table, data);
     try {
         const res = await fetchWithRetry(restUrl(table), {
             method: "POST",
@@ -206,6 +216,7 @@ export async function upsert<T = any>(
     data: Record<string, any> | Record<string, any>[]
 ): Promise<SupabaseResult<T[]>> {
     if (isOffline()) return { data: null, error: OFFLINE_ERROR };
+    if (isSqlite) return sqlite.upsert<T>(table, data);
     try {
         const res = await fetchWithRetry(restUrl(table), {
             method: "POST",
@@ -232,6 +243,7 @@ export async function update(
     data: Record<string, any>
 ): Promise<SupabaseResult<any[]>> {
     if (isOffline()) return { data: null, error: OFFLINE_ERROR };
+    if (isSqlite) return sqlite.update(table, filters, data);
     try {
         const query = buildQueryParams(filters);
         const res = await fetchWithRetry(restUrl(table, query), {
@@ -258,6 +270,7 @@ export async function del(
     filters: Filter
 ): Promise<SupabaseResult<any[]>> {
     if (isOffline()) return { data: null, error: OFFLINE_ERROR };
+    if (isSqlite) return sqlite.del(table, filters);
     try {
         const query = buildQueryParams(filters);
         const res = await fetchWithRetry(restUrl(table, query), {
@@ -283,6 +296,7 @@ export async function rpc<T = any>(
     params: Record<string, any> = {}
 ): Promise<SupabaseResult<T>> {
     if (isOffline()) return { data: null, error: OFFLINE_ERROR };
+    if (isSqlite) return sqlite.rpc<T>(functionName, params);
     try {
         const { url } = getConfig();
         const res = await fetchWithRetry(`${url}/rest/v1/rpc/${functionName}`, {

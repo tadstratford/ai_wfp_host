@@ -1,0 +1,45 @@
+# Render Blueprint — self-host deployment with an embedded SQLite datastore.
+#
+# The SQLite DB lives on a persistent disk mounted at /var/data (DATA_DIR), so it
+# survives redeploys/restarts. A persistent disk pins the service to a single
+# instance (Render does not autoscale disk-backed services), which is what the
+# in-process datastore + in-memory workspace sessions assume anyway.
+#
+# Secrets (APP_SECRET, ADMIN_USER/ADMIN_PASSWORD, LLM_API_KEY) are marked
+# `sync: false` — set them in the Render dashboard, never in the repo.
+
+services:
+  - type: web
+    name: workflowpeople
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: standard
+    healthCheckPath: /auth/login
+    envVars:
+      - key: EDITION
+        value: enterprise
+      - key: DB_BACKEND
+        value: sqlite
+      - key: AUTH
+        value: password
+      - key: DATA_DIR
+        value: /var/data
+      - key: INSTANCE
+        value: prod
+      - key: DB_AUDIT_ENABLED
+        value: "1"
+      # Operator server-side LLM keys (admin_pays). Set in the dashboard.
+      - key: LLM_API_PROVIDER
+        value: openrouter
+      - key: LLM_API_KEY
+        sync: false
+      - key: APP_SECRET
+        sync: false
+      - key: ADMIN_USER
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+    disk:
+      name: workflowpeople-data
+      mountPath: /var/data
+      sizeGB: 10

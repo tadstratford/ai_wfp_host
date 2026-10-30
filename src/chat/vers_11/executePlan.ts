@@ -267,7 +267,6 @@ export async function executePlan(opts: {
   const toolsUsed: string[] = [];
   const { plan, io, session } = opts;
   let relationshipsOutput: unknown = null;
-  let dataIndex = 0;
   let rendered = false;
   let finalDataTool: string | null = null;
   let finalDataText: string | null = null;
@@ -317,12 +316,21 @@ export async function executePlan(opts: {
 
       // data step
       step.status = "running";
+      const dataIndex = plan.steps.slice(0, plan.cursor).filter((s) => s.kind === "data").length;
       await io.addMessage({
         markdown: step.label,
         json: { kind: "step-status", index: dataIndex, status: "running", label: step.label },
       });
       try {
         const resolved = resolveTemplates(step.args, session.parameters, io.databaseId) as Record<string, unknown>;
+        if (
+          step.tool === "show_message" &&
+          typeof resolved.markdown === "string" &&
+          finalDataTool === "get_data" &&
+          finalDataText
+        ) {
+          resolved.markdown = `${resolved.markdown}\n\n${renderGetDataResult(finalDataText)}`;
+        }
         const mcpResult = await withTimeout(
           aggregator.callTool(step.tool, resolved),
           loadConfig().loop.toolTimeoutMs,
@@ -355,7 +363,6 @@ export async function executePlan(opts: {
         markdown: step.label,
         json: { kind: "step-status", index: dataIndex, status: step.status, label: step.label },
       });
-      dataIndex++;
       await persistPlan(io, plan, session.parameters);
       plan.cursor++;
     }

@@ -104,11 +104,16 @@ compile-time fork — the same binary serves any edition. **Defaults to `hosted`
 
 |                   | `hosted` (default)     | `enterprise`               | `local`                    |
 | ----------------- | ---------------------- | -------------------------- | -------------------------- |
-| Workspace storage | Supabase               | Supabase                   | Local `.wfp` files         |
+| Workspace storage | Supabase               | SQLite (embedded)          | Local `.wfp` files         |
 | Auth              | Google OAuth           | password (`AUTH=password`) | none (single user)         |
 | Users             | multi-user             | multi-user (firm/clients)  | single user (`ADMIN_USER`) |
 | LLM key           | server key or per-user | admin `.env` key           | bring your own (BYO)       |
 | Billing           | `credits`              | `admin_pays`               | `none` (BYO)               |
+
+`enterprise` defaults to an in-process SQLite datastore
+(`DB_BACKEND=sqlite`; file under `data/{INSTANCE}/workflowpeople.db`), so no
+external Postgres is required — point `DATA_DIR` at a persistent disk (see
+`render.yaml`). Set `DB_BACKEND=postgres` to keep using Supabase in enterprise.
 
 Billing is covered in
 [`docs/credits-and-billing.md`](docs/credits-and-billing.md); the
@@ -119,8 +124,11 @@ layer-by-edition differences are mapped in
 
 Copy `.env.example` to `.env`. Requirements vary by edition:
 
-- **`hosted` / `enterprise`** — `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `APP_SECRET`,
+- **`hosted`** — `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `APP_SECRET`,
   plus a Classifier key and an LLM key.
+- **`enterprise`** — `APP_SECRET` + `ADMIN_USER`/`ADMIN_PASSWORD` (SQLite by
+  default; no Supabase). Optionally set `DB_BACKEND=postgres` +
+  `SUPABASE_URL`/`SUPABASE_SERVICE_KEY` to keep Supabase.
 - **`local`** — `APP_SECRET`, `ADMIN_USER`, and your own LLM key (e.g.
   `DEEPSEEK_API_KEY`, `OPENROUTER_API_KEY`, or `LLM_API_PROVIDER`/`LLM_API_KEY`).
 

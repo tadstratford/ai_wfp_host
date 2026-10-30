@@ -7,14 +7,18 @@ import { userRouter } from "../ui/pages/user/router";
 import { appRouter } from "../ui/pages/app/router";
 import { designRouter } from "../ui/pages/design/router";
 import { inboundRouter } from "./inbound/router";
+import { adminRouter } from "../ui/pages/admin/router";
 import { cleanupExpiredShares } from "@backend/core/workspace/shareWorkflow";
 
 import { validateUser } from "@frontend/pages/auth/getValidUser";
 import type { User } from "@backend/types";
 import { userManager } from "@backend/core/admin/userManager";
 import { logError } from "@backend/core/logging/errorLogger";
-import { EDITION, AUTH_MODE } from "@shared/edition";
+import { EDITION, AUTH_MODE, dbBackend } from "@shared/edition";
 import { hashPassword } from "@backend/core/crypto/hash";
+import { initDbBackend } from "@backend/core/admin/supabase";
+import { dbFilePath } from "@backend/core/admin/sqlite";
+import { resolve } from "node:path";
 
 const app = new Hono();
 
@@ -128,6 +132,7 @@ app.route("/app", appRouter);
 app.route("/sessions", sessionsRouter);
 app.route("/user", userRouter);
 app.route("/design-system", designRouter);
+app.route("/admin", adminRouter);
 // workspace + workbook routes moved to /app/* (pages/app/router.tsx)
 
 // Verify Supabase connection and pre-create admin user on startup
@@ -138,10 +143,19 @@ app.route("/design-system", designRouter);
     );
   }
 
-  console.log("[Startup] Verifying Supabase connection...");
+  const backend = dbBackend();
+  console.log(
+    backend === "sqlite"
+      ? "[Startup] Opening SQLite datastore..."
+      : "[Startup] Verifying Supabase connection...",
+  );
 
   if (EDITION !== "local") {
     try {
+      if (backend === "sqlite") {
+        initDbBackend();
+      }
+
       const ensureUser = async (email: string | undefined, isAdmin: boolean) => {
         const e = email?.trim();
         if (!e) return;
@@ -193,12 +207,16 @@ app.route("/design-system", designRouter);
         await ensureUser(bypassEmail, false);
       }
 
-      console.log("[Startup] Supabase connection verified");
+      console.log(
+        backend === "sqlite"
+          ? `[Startup] SQLite datastore ready: ${resolve(dbFilePath())}`
+          : "[Startup] Supabase connection verified",
+      );
     } catch (error) {
-      console.error("[Startup] Supabase connection failed:", error);
+      console.error("[Startup] Datastore init failed:", error);
     }
   } else {
-    console.log("[Startup] EDITION=local — skipping Supabase (single-user, no auth).");
+    console.log("[Startup] EDITION=local — skipping datastore (single-user, no auth).");
   }
 
   // Initialize MCP aggregator (QBO + App servers)

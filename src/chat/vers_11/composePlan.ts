@@ -12,7 +12,7 @@
 
 import { getPlanner } from "./plan/planner";
 import type { PlanRequest, PlanResult } from "./plan/planner";
-import { isDurableTool, isMutatingTool, listCapabilities } from "../../capabilities/registry";
+import { getToolClass, isDurableTool, isMutatingTool, listCapabilities } from "../../capabilities/registry";
 import { enabledSkillNamesForDatabase } from "../../core/skills/loader";
 import { getCapabilityIndex } from "@mcp/capabilityIndex";
 import { COMPOSABLE_PRIMITIVES } from "./plan/primitives";
@@ -182,6 +182,11 @@ export async function composePlan(input: ComposeInput): Promise<TurnPlan> {
   const writeIdx = dataSteps.findIndex((s) => isMutatingTool(s.tool) || s.durable === true);
   const mutatingRequest = input.mode === "build" && input.mutating >= 0.5 && writeIdx >= 0;
 
+  // A destructive-write step (external post/send/delete) that comes AFTER the
+  // write boundary is gated a second time, so a "preview → confirm → post" rule
+  // can show the computed lines before the external change is made.
+  const destructiveIdx = dataSteps.findIndex((s) => getToolClass(s.tool) === "destructive-write");
+
   // Assemble: data steps, with rule checks and the approval gate injected at the
   // write boundary (rule checks run BEFORE the gate).
   const assembled: Step[] = [];
@@ -233,7 +238,20 @@ export async function composePlan(input: ComposeInput): Promise<TurnPlan> {
       prompt: "This request will create, modify, or send data. Approve to continue.",
       status: "pending",
     });
-    assembled.push(...dataSteps.slice(writeIdx));
+    if (destructiveIdx > writeIdx) {
+      assembled.push(...dataSteps.slice(writeIdx, destructiveIdx));
+      assembled.push({
+        kind: "control",
+        control: "approval",
+        prompt:
+          `The next step (\`${dataSteps[destructiveIdx].tool}\`) posts or sends data externally. ` +
+          `Review the preview above and approve to continue.`,
+        status: "pending",
+      });
+      assembled.push(...dataSteps.slice(destructiveIdx));
+    } else {
+      assembled.push(...dataSteps.slice(writeIdx));
+    }
   } else {
     assembled.push(...dataSteps);
     assembled.push(...ruleSteps);

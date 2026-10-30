@@ -23,6 +23,23 @@ function resolveEdition(): Edition {
 
 export const EDITION: Edition = resolveEdition();
 
+// DB_BACKEND — which datastore backs the shared/admin tables. Selectable via the
+// DB_BACKEND env var (overrides the edition default):
+//   "postgres" — PostgREST→Supabase/Postgres (hosted SaaS; the legacy default).
+//   "sqlite"   — in-process SQLite file under dataRoot()/data/<instance>/…,
+//                collocated with the Bun server on a persistent disk (self-host).
+// Default by edition: hosted→postgres, enterprise→sqlite, local→sqlite (the
+// local path short-circuits before the DB is ever touched).
+export type DbBackend = "postgres" | "sqlite";
+
+export function dbBackend(): DbBackend {
+  const raw = (process.env.DB_BACKEND ?? "").trim().toLowerCase();
+  if (raw === "sqlite") return "sqlite";
+  if (raw === "postgres") return "postgres";
+  if (EDITION === "enterprise" || EDITION === "local") return "sqlite";
+  return "postgres";
+}
+
 // AUTH_MODE — how users sign in. Preset by EDITION, overridable via the AUTH
 // env var:
 //   none     — no login (local single-user; the existing EDITION=local path)
