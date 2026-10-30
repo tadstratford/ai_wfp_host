@@ -317,6 +317,12 @@ export async function executePlan(opts: {
       // data step
       step.status = "running";
       const dataIndex = plan.steps.slice(0, plan.cursor).filter((s) => s.kind === "data").length;
+      if (io.verbose) {
+        await io.addMessage({
+          markdown: `▶ ${step.label}`,
+          json: { kind: "thinking", stage: "step-start", index: dataIndex, label: step.label },
+        });
+      }
       await io.addMessage({
         markdown: step.label,
         json: { kind: "step-status", index: dataIndex, status: "running", label: step.label },

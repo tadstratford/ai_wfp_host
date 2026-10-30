@@ -26,6 +26,9 @@ export interface OrchestratorIO {
   addMessage: (msg: AddMessageArgs) => Promise<void>;
   addError: (title: string, detail?: string) => Promise<void>;
   mode: string;
+  /** When true, emit the "thinking" transparency stream (classify options →
+   *  outcome → compose → step-start) into the chat. Mirrors `chatVerbose`. */
+  verbose: boolean;
 }
 
 export interface SelectedRule {

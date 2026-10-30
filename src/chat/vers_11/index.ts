@@ -113,6 +113,7 @@ export async function handleMessage(
       sessionId,
       workflowId: session.activeWorkflowId as string | undefined,
       mode,
+      verbose,
       addMessage: async (msg: AddMessageArgs) => {
         const latest = await getSession(databaseId, sessionId);
         if (latest) session = latest;

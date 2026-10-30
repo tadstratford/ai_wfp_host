@@ -34,6 +34,7 @@ function looksLikeReview(raw: string): boolean {
 export interface Ranked {
   name: string;
   prob: number;
+  description?: string;
 }
 
 export interface RouteDecision {
@@ -219,7 +220,10 @@ export async function route(
 
   const rankedSkills: Ranked[] = Object.entries(skillAnswer?.probabilities ?? {})
     .sort((a, b) => b[1] - a[1])
-    .map(([name, prob]) => ({ name, prob }));
+    .map(([name, prob]) => {
+      const match = skills.find((s) => s.name === name);
+      return { name, prob, description: match?.description };
+    });
 
   let selectedSkills = (explicit ? [{ name: explicit, prob: 1 }] : rankedSkills)
     .filter((r) => r.prob >= loadConfig().routing.skillProbThreshold)

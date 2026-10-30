@@ -23,6 +23,13 @@ import { logAndFireJev } from "../jevLog";
 import type { SelectedRule } from "./types";
 import { loadConfig } from "./config";
 
+/** Sentinel option in the rule-select choice. A `choice` question normalizes its
+ *  probabilities to sum to 1, so a single candidate rule is always scored ~1.0
+ *  even when it is irrelevant. This option gives Jev a real "none applies" out,
+ *  so an unrelated request (e.g. "review the audit data") doesn't force the
+ *  allocation rule. The sentinel is never returned as a selected rule. */
+const NO_RULE_KEY = "__no_rule_applies__";
+
 export interface RuleSelectionContext {
   lastRequest?: string;
   activeSkills?: string[];
@@ -40,14 +47,29 @@ function keywordScore(rule: { name: string; description?: string }, raw: string)
   return score;
 }
 
+/** A rule candidate with its relevance score, for the rule-selection thinking
+ *  card (options shown before the outcome). */
+export interface RuleOption {
+  name: string;
+  description?: string;
+  prob: number;
+}
+
+export interface RuleSelection {
+  /** Rules that cleared the probability threshold (the "applying" rules). */
+  selected: SelectedRule[];
+  /** The full ranked candidate list (name + description + prob), for display. */
+  options: RuleOption[];
+}
+
 export async function selectRules(
   databaseId: string,
   userId: string,
   rawMessage: string,
   context?: RuleSelectionContext,
-): Promise<SelectedRule[]> {
+): Promise<RuleSelection> {
   const rules = loadRules(databaseId);
-  if (rules.length === 0) return [];
+  if (rules.length === 0) return { selected: [], options: [] };
 
   const cfg = loadConfig().rules;
 
@@ -55,7 +77,7 @@ export async function selectRules(
   try {
     key = await getClassifierKey(userId);
   } catch {
-    return []; // no classifier key — rules are an enhancement, not a hard dependency
+    return { selected: [], options: [] }; // no classifier key — rules are an enhancement, not a hard dependency
   }
 
   // Privacy-mask the user-derived request (rule names/descriptions are criteria
@@ -131,9 +153,10 @@ export async function selectRules(
   const byName = new Map(candidates.map((r) => [r.name, r]));
   const ruleCriteria: Record<string, string> = {};
   for (const r of candidates) ruleCriteria[r.name] = r.description || "(no description)";
+  ruleCriteria[NO_RULE_KEY] = "None of these rules apply — the request is unrelated to any workspace rule.";
 
   let ruleAnswer: ChoiceAnswer;
-  const ruleQuestions = { rule: { type: "choice", instructions: "Which workspace rule applies to the user's request?", criteria: ruleCriteria } } as Record<string, Question>;
+  const ruleQuestions = { rule: { type: "choice", instructions: "Which workspace rule applies to the user's request? Choose the rule that genuinely applies, or choose the 'no rule applies' option when the request is unrelated to any rule.", criteria: ruleCriteria } } as Record<string, Question>;
   const t1 = Date.now();
   try {
     const { response } = await askClassifier(state, ruleQuestions, { apiKey: key });
@@ -152,11 +175,11 @@ export async function selectRules(
     ruleAnswer = response.answers.rule as ChoiceAnswer;
   } catch (err: any) {
     console.warn(`[vers_11] rule description stage failed: ${err.message}`);
-    return [];
+    return { selected: [], options: [] };
   }
 
   const ranked = Object.entries(ruleAnswer.probabilities ?? {})
-    .filter(([, p]) => p >= cfg.probThreshold)
+    .filter(([name, p]) => name !== NO_RULE_KEY && p >= cfg.probThreshold)
     .sort((a, b) => b[1] - a[1])
     .slice(0, cfg.maxRules);
 
@@ -166,7 +189,14 @@ export async function selectRules(
     if (!r) continue;
     out.push({ name: r.name, description: r.description, content: r.content, tools: ruleTools(r), prob });
   }
-  return out;
+
+  // Full candidate list for the thinking card (unfiltered by threshold).
+  const options: RuleOption[] = Object.entries(ruleAnswer.probabilities ?? {})
+    .filter(([name]) => name !== NO_RULE_KEY && byName.has(name))
+    .map(([name, prob]) => ({ name, description: byName.get(name)?.description, prob }))
+    .sort((a, b) => b.prob - a.prob);
+
+  return { selected: out, options };
 }
 
 /** The rule's tool references: structured when present, else derived once from

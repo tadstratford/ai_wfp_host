@@ -29,10 +29,18 @@ import { composePlan } from "./composePlan";
 import { executePlan, emitPlanMessage, persistPlan } from "./executePlan";
 import { resumePlan } from "./resume";
 import { persistClarifiedParams } from "./plan/clarify";
-import type { ClassifiedRule, SelectedRule, TurnPlan } from "./types";
+import { getCapabilityIndex } from "@mcp/capabilityIndex";
+import type { ClassifiedRule, DataStep, SelectedRule, TurnPlan } from "./types";
 import type { MetaData } from "wfp-api";
 
 const GUARDRAILS_SKILL = "guardrails";
+
+/** Cap the classify-options list shown in the thinking stream — the full ranked
+ *  distribution stays on `decision.skills`, but the card shows a readable few. */
+const CLASSIFY_OPTIONS_MAX = 6;
+
+/** Cap the rule-selection options shown in the thinking stream. */
+const RULE_OPTIONS_MAX = 6;
 
 function safeStringify(v: unknown, maxLen = 4000): string {
   try {
@@ -149,8 +157,32 @@ export async function processUserMessage(
     return;
   }
 
+  // ── Thinking stream: classify options → outcome ────────────────────────────
+  // Surface the routing decision as two visible beats (options at this point,
+  // the pick at the next) so the user can follow the model's reasoning. Gated by
+  // verbose (chatVerbose). No extra model call — both derive from the single
+  // routing result already computed above.
+  if (io.verbose) {
+    const classifyPrompt = "Figuring out what type of problem this is…";
+    const options = decision.skills.slice(0, CLASSIFY_OPTIONS_MAX).map((s) => ({
+      name: s.name,
+      description: s.description,
+      prob: s.prob,
+    }));
+    await io.addMessage({
+      markdown:
+        `**${classifyPrompt}**\n` +
+        options.map((o) => `- ${o.name} (${Math.round(o.prob * 100)}%)`).join("\n"),
+      json: { kind: "thinking", stage: "classify-options", prompt: classifyPrompt, options },
+    });
+    await io.addMessage({
+      markdown: `Picked: ${routedSkills.map((s) => `\`${s}\``).join(", ")}`,
+      json: { kind: "thinking", stage: "classify-outcome", chosen: routedSkills },
+    });
+  }
+
   // ── Rule selection + classification ───────────────────────────────────────
-  const selectedRules: SelectedRule[] = await selectRules(io.databaseId, io.userId, rawMessage, {
+  const { selected: selectedRules, options: ruleOptions } = await selectRules(io.databaseId, io.userId, rawMessage, {
     lastRequest: meta.lastRequest,
     activeSkills: routedSkills,
     sessionId: io.sessionId,
@@ -163,7 +195,39 @@ export async function processUserMessage(
     json: { kind: "meta" },
   });
 
-  if (classified.length > 0) {
+  if (io.verbose) {
+    // Rule selection is the second decision after skill routing — surface the
+    // candidate rules with relevance scores, then the applying rules + tier.
+    if (ruleOptions.length > 0) {
+      const rulesPrompt = "Figuring out which workspace rules apply…";
+      const ruleOptionList = ruleOptions.slice(0, RULE_OPTIONS_MAX).map((o) => ({
+        name: o.name,
+        description: o.description,
+        prob: o.prob,
+      }));
+      await io.addMessage({
+        markdown:
+          `**${rulesPrompt}**\n` +
+          ruleOptionList.map((o) => `- ${o.name} (${Math.round(o.prob * 100)}%)`).join("\n"),
+        json: { kind: "thinking", stage: "rules-options", prompt: rulesPrompt, options: ruleOptionList },
+      });
+    }
+    if (classified.length > 0) {
+      await io.addMessage({
+        markdown: `Rules applying: ${classified.map((c) => `\`${c.rule.name}\` (${c.tier})`).join(", ")}`,
+        json: {
+          kind: "thinking",
+          stage: "rules-outcome",
+          rules: classified.map((c) => ({ name: c.rule.name, tier: c.tier, prob: c.rule.prob })),
+        },
+      });
+    } else if (ruleOptions.length > 0) {
+      await io.addMessage({
+        markdown: "No workspace rules apply.",
+        json: { kind: "thinking", stage: "rules-outcome", rules: [] },
+      });
+    }
+  } else if (classified.length > 0) {
     await io.addMessage({
       markdown: `**Rules applying:** ${classified.map((c) => `\`${c.rule.name}\` (${c.tier})`).join(", ")}`,
       json: { kind: "rules", rules: classified.map((c) => ({ name: c.rule.name, tier: c.tier, tool: c.tool })) },
@@ -177,7 +241,11 @@ export async function processUserMessage(
   });
 
   // ── Compose + execute the plan ────────────────────────────────────────────
-  await io.addMessage({ markdown: "> _Composing plan…_", json: { kind: "meta", phase: "compose" } });
+  if (io.verbose) {
+    await io.addMessage({ markdown: "Building a plan…", json: { kind: "thinking", stage: "compose" } });
+  } else {
+    await io.addMessage({ markdown: "> _Composing plan…_", json: { kind: "meta", phase: "compose" } });
+  }
   const plan = await composePlan({
     databaseId: io.databaseId,
     userId: io.userId,
@@ -193,6 +261,28 @@ export async function processUserMessage(
   });
 
   const reviewShaped = routedSkills.includes("data-account-check");
+
+  // ── Thinking stream: the tools the plan will use ───────────────────────────
+  // The plan's data steps name the tools drawn from the routed skills' declared
+  // tools (plus the selected rules' method tools). Surface them with their
+  // descriptions so the "thought" behind each tool is visible, before they run.
+  if (io.verbose) {
+    const planTools = plan.steps.filter((s): s is DataStep => s.kind === "data" && !s.ruleCheck);
+    if (planTools.length > 0) {
+      const capability = await getCapabilityIndex();
+      const tools = planTools.map((s) => ({
+        name: s.tool,
+        label: s.label,
+        description: capability.tools.get(s.tool)?.description,
+      }));
+      await io.addMessage({
+        markdown:
+          `**Tools:**\n` +
+          tools.map((t) => `- ${t.name}${t.label && t.label !== t.name ? ` — ${t.label}` : ""}`).join("\n"),
+        json: { kind: "thinking", stage: "tools", tools },
+      });
+    }
+  }
 
   await persistPlan(io, plan);
   await emitPlanMessage(io, plan);

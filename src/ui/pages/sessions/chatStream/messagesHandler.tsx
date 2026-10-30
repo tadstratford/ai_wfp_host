@@ -8,6 +8,7 @@ import { InlineAudit } from "./InlineAudit";
 import { InlineReview } from "./InlineReview";
 import { InlinePlan } from "./InlinePlan";
 import { InlineResolution } from "./InlineResolution";
+import { Thinking } from "./Thinking";
 
 /**
  * Get messages for a session
@@ -253,6 +254,9 @@ export const messagesHandler = async (c: Context) => {
               sessionId={sessionId}
               postMortemHtml={postMortems[auditJson.auditId]}
             />
+          ) : kind === "thinking" ? (
+            /* vers_11 thinking stream (classify options/outcome, compose, step-start) */
+            <Thinking json={message.json} />
           ) : kind === "review" && message.json?.review ? (
             /* Visual data-review card (relationship map + variance + verdicts) */
             <InlineReview review={message.json.review} receiptsHtml={message.html || message.markdown} sessionId={sessionId} />
