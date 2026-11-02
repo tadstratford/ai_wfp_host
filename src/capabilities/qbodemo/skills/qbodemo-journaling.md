@@ -2,7 +2,7 @@
 name: qbodemo-journaling
 group: qbodemo
 description: Post journal entries to the DEMO QuickBooks company (Acme Fund Services), including shared-services expense allocations across funds (classes). Activate ONLY when the user asks to create, post, allocate, or reclassify a journal entry against the demo company.
-tools: [{"name":"qbodemo_accounts_list","role":"resolve account names to Ids"},{"name":"qbodemo_classes_list","role":"resolve fund (class) names to Ids"},{"name":"qbodemo_allocation_compute","role":"deterministic split to balanced interim-table lines"},{"name":"get_data","role":"read the allocation table, expense CSV, and interim table"},{"name":"list_data","role":"list available data"},{"name":"list_rules","role":"read the workspace allocation rule"},{"name":"get_rule","role":"read the workspace allocation rule"},{"name":"qbodemo_journal_create","role":"post the journal entry"},{"name":"qbodemo_journal_entries","role":"verify the posted entry"},{"name":"show_message","role":"confirm the post and report the entry Id"}]
+tools: [{"name":"qbodemo_accounts_list","role":"resolve account names to Ids"},{"name":"qbodemo_classes_list","role":"resolve fund (class) names to Ids"},{"name":"qbodemo_allocation_compute","role":"deterministic split to balanced interim-table lines"},{"name":"get_data","role":"read the allocation table, expense CSV, and interim table"},{"name":"list_data","role":"list available data"},{"name":"list_skills","role":"read the workspace allocation skill"},{"name":"get_skill","role":"read the workspace allocation skill"},{"name":"qbodemo_journal_create","role":"post the journal entry"},{"name":"qbodemo_journal_entries","role":"verify the posted entry"},{"name":"show_message","role":"confirm the post and report the entry Id"}]
 ---
 
 ## When to use
@@ -12,7 +12,7 @@ Only apply this skill when the user is asking to WRITE to the demo QuickBooks �
 1. Resolve accounts — call `qbodemo_accounts_list` to get account Ids and names. Accounts may be referenced by Id or exact name.
 2. Resolve classes — call `qbodemo_classes_list` to get the fund (class) names and Ids. The demo's classes are the three funds: Alpha Growth Fund LP, Beta Income Fund LP, Omega Real Estate Fund LP.
 3. Read the allocation inputs — the user loads an allocation table (fund × month → %) and a shared-services expense CSV. Amounts must come from those tables, never guessed.
-4. Follow the workspace allocation rule — read `list_rules` / `get_rule` (the rule is also injected into your context) and apply its method exactly.
+4. Follow the workspace allocation skill — read `list_skills` / `get_skill` (the skill is also injected into your context) and apply its method exactly.
 5. Compute the lines deterministically — call `qbodemo_allocation_compute` with the allocation table, the amounts file, the month, the debit account (`Shared Services`), and the credit account (`Shared Services Clearing`). It splits the total by the percentages and writes the balanced lines to an interim table (`staging_allocation_lines`). Never do this arithmetic yourself.
 6. Confirm with the user — read the interim table (`get_data` on `staging_allocation_lines`) and show a preview via `show_message`, then ask them to confirm before posting.
 7. Post — call `qbodemo_journal_create` with the transaction date and `lines_source` = `staging_allocation_lines` (the interim table from step 5). Show the returned journal entry Id.

@@ -131,7 +131,7 @@ The plan path is **pluggable**: the orchestrator calls `getPlanner().plan(reques
 
 `registerShape()` is the extension point for future non-internal (external MCP) tool shapes.
 
-**Bespoke reports** (custom dashboards/charts) can't be expressed by a fixed template, so `cascade` returns `{ kind: "fallback", preferLoop: true }` — the orchestrator skips `llmPlanner` and runs the build loop directly (which authors bespoke HTML per `report-authoring.md`). **Broad exploration** ("analyze this data", "review this data") does the same: when the `analysis` shape's `explore` noul fires without a specific `aggregate`/`judge`/`report`, it defers to the build loop — the loop explores the tables, runs per-row `judge_data` rule-compliance checks, and composes findings — instead of emitting a shallow `list_data`/`list_rules` inventory plan.
+**Bespoke reports** (custom dashboards/charts) can't be expressed by a fixed template, so `cascade` returns `{ kind: "fallback", preferLoop: true }` — the orchestrator skips `llmPlanner` and runs the build loop directly (which authors bespoke HTML per `report-authoring.md`). **Broad exploration** ("analyze this data", "review this data") does the same: when the `analysis` shape's `explore` noul fires without a specific `aggregate`/`judge`/`report`, it defers to the build loop — the loop explores the tables, runs per-row `judge_data` rule-compliance checks, and composes findings — instead of emitting a shallow `list_data`/`list_skills` inventory plan.
 
 The other strategies are `jev-step` (the original `composePlan` → `validatePlan` step-by-step classifier) and `llm` (`llmPlanner`, the one-shot full-LLM plan used as the universal fallback).
 

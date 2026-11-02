@@ -12,7 +12,7 @@
  * subset that matched an active tag.
  */
 
-import { loadRules } from "../../rules/loader";
+import { loadWorkspaceSkills } from "../../rules/loader";
 import { declaredTools } from "../../core/skills/loader";
 import { askClassifier } from "@shared/typesafe/openRouter";
 import type { ChoiceAnswer, Question } from "@shared/typesafe/types";
@@ -68,7 +68,7 @@ export async function selectRules(
   rawMessage: string,
   context?: RuleSelectionContext,
 ): Promise<RuleSelection> {
-  const rules = loadRules(databaseId);
+  const rules = loadWorkspaceSkills(databaseId);
   if (rules.length === 0) return { selected: [], options: [] };
 
   const cfg = loadConfig().rules;

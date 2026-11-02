@@ -22,7 +22,7 @@ import "@frontend/templates/account-table";
 import "@frontend/templates/entity-manager";
 import "@frontend/templates/data-table";
 import { buildManifest, formatManifest } from "@chat/context/manifest";
-import { loadRules } from "@rules/loader";
+import { loadWorkspaceSkills } from "@rules/loader";
 import { createWorkflow } from "../createWorkflow";
 // buildAddNode appends a tool node to a workflow via the active WorkspaceSession.
 import { requireSessionByDatabaseId } from "@backend/core/workspace/workspaceSessionStore";
@@ -186,7 +186,7 @@ function clearProgress(databaseId: string): void {
  *  excluded — they are agent meta-instructions, not domain rules. */
 function buildUserRulesSection(databaseId: string): string {
   try {
-    const rules = loadRules(databaseId);
+    const rules = loadWorkspaceSkills(databaseId);
     if (rules.length === 0) return "No workspace rules.";
     return rules.map((s) => `### ${s.name}\n${s.content}`).join("\n\n");
   } catch {

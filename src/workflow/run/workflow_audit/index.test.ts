@@ -5,7 +5,7 @@ function mockApi(overrides: Record<string, unknown> = {}): any {
   const messages: any[] = [];
   const api: any = {
     getActiveWorkflow: () => ({ id: "wf1", name: "Test", description: "" }),
-    getRules: () => [],
+    getSkills: () => [],
     getClassifierKey: async () => "test-key",
     getStream: () => "some output",
     addMessage: (m: any) => {
@@ -29,7 +29,7 @@ describe("workflow_audit node", () => {
 
   it("fails closed when no classifier key is configured", async () => {
     const api = mockApi({
-      getRules: () => [
+      getSkills: () => [
         { name: "travel-sales", content: "Travel is booked to sales." },
       ],
       getClassifierKey: async () => null,

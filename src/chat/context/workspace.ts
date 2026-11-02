@@ -8,7 +8,7 @@
  * is loaded separately by `resolveRule`, `auditChatPlan`, and `prompts.ts`.
  */
 
-import { loadRules } from "../../rules/loader";
+import { loadWorkspaceSkills } from "../../rules/loader";
 import { getSessionByDatabaseId } from "@backend/core/workspace/workspaceSessionStore";
 
 export interface RuleBrief {
@@ -22,7 +22,7 @@ export interface RuleBrief {
  *  routing and shape classification can be rule-aware. */
 export function ruleBriefs(databaseId: string): RuleBrief[] {
   try {
-    return loadRules(databaseId).map((r) => ({
+    return loadWorkspaceSkills(databaseId).map((r) => ({
       name: r.name,
       description: r.description,
       tags: r.tags,

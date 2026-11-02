@@ -61,7 +61,7 @@ import {
   decodeAttachmentText,
 } from "@backend/core/workspace/emailInbox";
 import { loadAllSkills } from "@core/skills/loader";
-import { loadRules } from "@rules/loader";
+import { loadWorkspaceSkills } from "@rules/loader";
 import { getClassifierKey } from "@backend/core/user/getLLMApiKey";
 import { saveDataEntry } from "@data";
 import { aggregator } from "@mcp/aggregator";
@@ -394,32 +394,25 @@ export function createWFP_API(
     return typeof content === "string" ? content : null;
   };
 
-  // ── Skills (app-level, scoped to the database's enabled groups) ───────
+  // ── Skills (app + workspace, unified) ─────────────────────────────────
+  const allSkills = () => [
+    ...loadAllSkills(undefined, databaseId),
+    ...loadWorkspaceSkills(databaseId),
+  ];
   const getSkill = (name: string): string | null => {
-    return loadAllSkills(undefined, databaseId).find((s) => s.name === name)?.content ?? null;
+    return allSkills().find((s) => s.name === name)?.content ?? null;
   };
   const listSkills = (): { name: string; description?: string }[] => {
-    return loadAllSkills(undefined, databaseId).map((s) => ({
+    return allSkills().map((s) => ({
       name: s.name,
       ...(s.description ? { description: s.description } : {}),
     }));
   };
-
-  // ── Rules from the active workspace ───────────────────────────────────
-  const getRule = (name: string): string | null => {
-    return loadRules(databaseId).find((r) => r.name === name)?.content ?? null;
-  };
-  const listRules = (): { name: string; description?: string }[] => {
-    return loadRules(databaseId).map((r) => ({
-      name: r.name,
-      ...(r.description ? { description: r.description } : {}),
-    }));
-  };
-  const getRules = (): { name: string; description?: string; content: string }[] => {
-    return loadRules(databaseId).map((r) => ({
-      name: r.name,
-      ...(r.description ? { description: r.description } : {}),
-      content: r.content,
+  const getSkills = (): { name: string; description?: string; content: string }[] => {
+    return allSkills().map((s) => ({
+      name: s.name,
+      ...(s.description ? { description: s.description } : {}),
+      content: s.content,
     }));
   };
 
@@ -508,9 +501,7 @@ export function createWFP_API(
     getKnowledge,
     getSkill,
     listSkills,
-    getRule,
-    listRules,
-    getRules,
+    getSkills,
     getActiveWorkflow,
     getClassifierKey: async () => {
       const ws = getSessionByDatabaseId(databaseId);

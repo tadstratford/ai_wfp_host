@@ -390,22 +390,15 @@ export interface WFP_API {
   // ── Tier 2 — Universal ───────────────────────────────────────────────────
   getKnowledge(name: string): string | null;
   /**
-   * Read a skill's markdown content by name, or null if not found. Host-only
-   * (present in the hosted app; absent in minimal runners) — call defensively
-   * via `api.getSkill?.(name)`.
+   * Read a skill's markdown content by name, or null if not found. Covers both
+   * app skills and the workspace's own skills. Host-only (present in the hosted
+   * app; absent in minimal runners) — call defensively via `api.getSkill?.(name)`.
    */
   getSkill?(name: string): string | null;
-  /** List available skills (name + description). Host-only, like `getSkill`. */
+  /** List available skills (name + description) — app + workspace. Host-only, like `getSkill`. */
   listSkills?(): { name: string; description?: string }[];
-  /**
-   * Read a workspace rule's markdown content by name, or null if not found.
-   * Host-only — call defensively via `api.getRule?.(name)`.
-   */
-  getRule?(name: string): string | null;
-  /** List available workspace rules (name + description). Host-only, like `getRule`. */
-  listRules?(): { name: string; description?: string }[];
-  /** Full workspace rules (name + description + content) — host-only. */
-  getRules?(): { name: string; description?: string; content: string }[];
+  /** Full skills (name + description + content) — app + workspace. Host-only. */
+  getSkills?(): { name: string; description?: string; content: string }[];
   /**
    * The workflow this session is running (id, name, description). Host-only;
    * call defensively via `api.getActiveWorkflow?.()`. Lets a workflow step read

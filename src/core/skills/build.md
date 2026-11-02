@@ -17,7 +17,7 @@ Do not call `create_workflow`, `add_node`, `plan_workflow`, or `build_workflow`.
 4. Report — tell the user what happened and how to proceed.
 
 ## Tools needed
-- `create_rule`, `update_rule`, `get_rule` — workspace rules/preferences (not the workflow's design)
+- `create_skill`, `update_skill`, `get_skill` — workspace skills/preferences (not the workflow's design)
 - `list_workflows`, `get_workflow` — read verification
 - `run_workflow` — run an existing workflow
 - `show_message` — communicate progress and results to the user

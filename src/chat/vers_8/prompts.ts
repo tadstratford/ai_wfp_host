@@ -9,7 +9,7 @@
 import { WFP_TYPE_HINT } from "../../mcp/types";
 import type { ProviderToolSchema } from "@backend/core/llm/providers";
 import { loadAllSkills } from "../../core/skills/loader";
-import { loadRules } from "../../rules/loader";
+import { loadWorkspaceSkills } from "../../rules/loader";
 import { getSessionByDatabaseId } from "@backend/core/workspace/workspaceSessionStore";
 
 // ── Tool catalog builder ─────────────────────────────────────────────────────
@@ -49,7 +49,7 @@ function buildSkillsSection(databaseId: string, activeSkills?: string[]): string
 
 function buildRulesSection(databaseId: string): string {
   try {
-    const rules = loadRules(databaseId);
+    const rules = loadWorkspaceSkills(databaseId);
     if (rules.length === 0) return "";
 
     const lines = [`\n## Workspace Rules\nFollow these workspace rules and policies. They are always in effect.`];

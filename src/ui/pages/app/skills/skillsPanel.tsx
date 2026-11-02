@@ -25,6 +25,8 @@ function SkillsPanel({ catalog, user }: { catalog: CatalogWorkspace; user: User 
     skillsByGroup.set(s.groupId, list);
   }
 
+  const workspaceSkills = catalog.skills.filter((s) => s.source === "workspace");
+
   return (
     <div id="skills-panel" class="max-w-[1100px] mx-auto px-4 md:px-8 py-6 md:py-8">
       <h1 class="text-2xl font-bold text-ink dark:text-white mb-1">Skills</h1>
@@ -121,10 +123,10 @@ function SkillsPanel({ catalog, user }: { catalog: CatalogWorkspace; user: User 
         </div>
       </form>
 
-      {/* Workspace rules — the workspace-authored policies layered on top of app skills. */}
+      {/* Workspace skills — the workspace-authored skills layered on top of app skills. */}
       <div class="mt-8">
         <div class="flex items-center justify-between mb-2">
-          <h2 class="text-sm font-semibold text-ink-700 dark:text-white/80">Workspace rules</h2>
+          <h2 class="text-sm font-semibold text-ink-700 dark:text-white/80">Workspace skills</h2>
           <a
             hx-get="/app/rules"
             hx-target="#main-panel"
@@ -132,14 +134,14 @@ function SkillsPanel({ catalog, user }: { catalog: CatalogWorkspace; user: User 
             hx-push-url="/app/rules"
             class="text-xs font-semibold text-brand-600 dark:text-brand-300 no-underline hover:underline"
           >
-            Manage rules →
+            Manage skills →
           </a>
         </div>
-        {catalog.rules.length === 0 ? (
-          <p class="text-xs text-ink-400 dark:text-ink-500 italic">No workspace rules yet.</p>
+        {workspaceSkills.length === 0 ? (
+          <p class="text-xs text-ink-400 dark:text-ink-500 italic">No workspace skills yet.</p>
         ) : (
           <div class="space-y-2">
-            {catalog.rules.map((r) => (
+            {workspaceSkills.map((r) => (
               <div
                 key={r.name}
                 class="rounded-xl border border-ink/[0.08] dark:border-white/[0.08] bg-white dark:bg-ink-900 px-4 py-3"

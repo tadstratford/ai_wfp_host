@@ -1,7 +1,7 @@
 /**
  * Rules validation — the workspace-open check that a rule's structured tool
  * references point at real tools. Run at open (results cached for the Rules
- * panel) and again in `create_rule`/`update_rule` so a bad tool name fails at
+ * panel) and again in `create_skill`/`update_skill` so a bad tool name fails at
  * authoring time instead of silently producing an empty plan later.
  *
  * Only checks tool *existence* here. Capability enablement is checked at

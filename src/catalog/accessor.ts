@@ -1,16 +1,16 @@
 /**
  * Catalog accessor — the merged, workspace-aware view of the server-wide
- * catalog plus the workspace's own rules. This is what the skills/capabilities
+ * catalog plus the workspace's own skills. This is what the skills/capabilities
  * page (and, later, routing) reads.
  *
  * Server-wide: skill groups, app skills, tools (from SQLite, materialized at
- * startup). Per-workspace: user rules (from the .wfp document) and the enabled
- * skill-group ids (from .wfp metadata).
+ * startup). Per-workspace: workspace-authored skills (from the .wfp document,
+ * merged into `skills` with `source: "workspace"`) and the enabled skill-group
+ * ids (from .wfp metadata).
  */
 
 import { select } from "@backend/core/admin/supabase";
-import { loadRules } from "@rules/loader";
-import type { Rule } from "wfp-format/rule";
+import { loadWorkspaceSkills } from "@rules/loader";
 import { ensureEnabledSkillGroups } from "@backend/core/admin/skillGroupsService";
 import { materializeCatalog } from "./materialize";
 
@@ -60,7 +60,6 @@ export interface CatalogStory {
 export interface CatalogWorkspace {
   groups: CatalogGroup[];
   skills: CatalogSkill[];
-  rules: Rule[];
   stories: CatalogStory[];
   enabledGroupIds: string[];
 }
@@ -161,7 +160,21 @@ export async function getCatalogForWorkspace(databaseId: string): Promise<Catalo
     })),
   }));
 
-  const rules = loadRules(databaseId);
+  const workspaceSkills: CatalogSkill[] = loadWorkspaceSkills(databaseId).map((r) => ({
+    name: r.name,
+    description: r.description ?? null,
+    scope: r.scope ?? null,
+    tags: r.tags ?? [],
+    groupId: null,
+    source: "workspace",
+    tools: (r.tools ?? []).map((t) => ({
+      name: t.name,
+      role: t.role ?? null,
+      description: toolDesc.get(t.name) ?? null,
+    })),
+  }));
+
+  const allSkills = [...skills, ...workspaceSkills];
 
   const beatsByStory = new Map<string, CatalogBeat[]>();
   for (const b of beatsRes.data ?? []) {
@@ -191,5 +204,5 @@ export async function getCatalogForWorkspace(databaseId: string): Promise<Catalo
     };
   });
 
-  return { groups, skills, rules, stories, enabledGroupIds };
+  return { groups, skills: allSkills, stories, enabledGroupIds };
 }

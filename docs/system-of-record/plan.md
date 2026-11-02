@@ -241,7 +241,7 @@ placed **before** the write-approval gate — a flagged rule blocks the write.
 
 ## 10. Rule = Skill unification
 
-Status: **done** (data layer) — catalog merge + consumer naming open.
+Status: **done**.
 
 Workspace "rules" and app "skills" are one type. `Rule` is a `Skill` with
 `source: "workspace"`; the `.wfp` `rules[]` node migrates to `skills[]`.
@@ -253,16 +253,25 @@ Workspace "rules" and app "skills" are one type. `Rule` is a `Skill` with
       `rules` (`src/workspace/WorkspaceSession.ts`). Accessor aliases kept:
       `getRules` / `getRule` / `upsertRule` / `deleteRule`.
 - [x] Rules store/loader/validate operate on `skills[]` (read `skills ?? rules`;
-      write `skills` only) — `src/rules/store.ts`.
+      write `skills` only) — `src/rules/store.ts`; `loadWorkspaceSkills` is the
+      canonical loader (`loadRules` kept as a deprecated alias).
 - [x] Persistence — `WorkspaceSession` accessors delegate to the store;
       `workspaceStore.ts` writes `skills`; `reconstruct.ts` reconstructs `skills`.
-- [ ] Catalog merge — `getCatalogForWorkspace` still returns workspace rules in a
-      separate `rules` field rather than merged into `skills` (`source:
-      "workspace"`); `materializeCatalog` correctly excludes workspace skills.
-- [ ] Consumer naming — the `rules` capability (`list_rules` / `create_rule` /
-      `get_rule` / `update_rule` / `delete_rule` / `select_rule`), the wfp-api
-      (`getRule` / `listRules`), and chat consumers (v8/v11/context manifest)
-      still use "rules" terminology.
+- [x] Catalog merge — `getCatalogForWorkspace` merges workspace skills into
+      `skills` (`source: "workspace"`), dropping the separate `rules` field
+      (`src/catalog/accessor.ts`); the skills panel filters `source: "workspace"`.
+- [x] Consumer naming — the `rules` capability was absorbed into
+      `skill-activation`: `list_skills` / `get_skill` / `select_skill` now cover
+      workspace skills too, and `create_rule` / `update_rule` / `delete_rule`
+      became `create_skill` / `update_skill` / `delete_skill`. wfp-api unified:
+      `getSkill` / `listSkills` cover app + workspace skills; `getRules` became
+      `getSkills`. Chat consumers import `loadWorkspaceSkills`; tool allowlists
+      and skill markdown reference the `*_skill` tool names.
 - [x] Docs — `docs/system-of-record/wfp-nodes.md` (`skills[]`, formerly
       `rules[]`); typecheck clean; 339 tests / 0 fail.
+
+The v11 enforcement internals (`SelectedRule`, `classifyRule`,
+`composeRuleChecks`, `ruleParse`) intentionally keep the "rule" term — they model
+constraints (a skill's `## Rules` section), not the workspace-skill data type.
+
 

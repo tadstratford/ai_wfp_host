@@ -2,7 +2,7 @@
 //
 // Workflow tools run with broad host access (api.fetch, api.setData), so
 // exposing the *internal control* MCP tools (delete_data, build_workflow,
-// delete_rule, send_email, qbo_journal_create, …) would widen the blast
+// delete_skill, send_email, qbo_journal_create, …) would widen the blast
 // radius for no benefit.
 //
 // Policy: default-deny. Every capability declares each tool's class in its

@@ -18,7 +18,6 @@ import { dataCapability } from "./data/capability";
 import { metadataCapability } from "./metadata/capability";
 import { todosCapability } from "./todos/capability";
 import { plansCapability } from "./plans/capability";
-import { rulesCapability } from "./rules/capability";
 import { skillActivationCapability } from "./skill-activation/capability";
 import { judgeCapability } from "./judge/capability";
 import { emailsCapability } from "./emails/capability";
@@ -40,7 +39,6 @@ const CAPABILITIES: CapabilityModule[] = [
   metadataCapability,
   todosCapability,
   plansCapability,
-  rulesCapability,
   skillActivationCapability,
   judgeCapability,
   emailsCapability,

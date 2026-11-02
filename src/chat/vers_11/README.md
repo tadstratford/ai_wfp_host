@@ -301,7 +301,7 @@ Each is a concrete blocker to "self-contained" and has a specific resolution.
       or `report_table → chat_download` (report).
 - [ ] **Storytelling via skills/tools** — beats as `communication` steps; remove any
       harness story logic.
-- [ ] **Rule-builder tool validation** — `create_rule`/`update_rule` + rule wizard
+- [ ] **Rule-builder tool validation** — `create_skill`/`update_skill` + rule wizard
       validate `## Tools needed` (tool exists + capability enabled) and warn.
 - [ ] **Delete removed versions** — execute the §9 actions (remove vers_5/8/9/10).
 

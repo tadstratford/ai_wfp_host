@@ -7,7 +7,7 @@ const manifest: CapabilityManifest = {
   key: "skill-activation",
   name: "Skill Activation",
   version: "1.0.0",
-  description: "App skill catalog and activation.",
+  description: "Skill catalog, activation, and workspace-skill authoring (create/update/delete).",
   trust: "core",
   kind: "builtin",
 };

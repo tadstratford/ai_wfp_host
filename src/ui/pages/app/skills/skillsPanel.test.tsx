@@ -13,10 +13,19 @@ mock.module("@backend/catalog", () => ({
         scope: "chat+workflow",
         tags: [],
         groupId: "core",
+        source: "app",
         tools: [{ name: "chat_download", role: "deliver", description: "Deliver file" }],
       },
+      {
+        name: "shared-services-allocation",
+        description: "Allocate shared services",
+        scope: null,
+        tags: [],
+        groupId: null,
+        source: "workspace",
+        tools: [],
+      },
     ],
-    rules: [{ name: "shared-services-allocation", description: "Allocate shared services" }],
     enabledGroupIds: ["core"],
   }),
 }));
@@ -39,7 +48,7 @@ function ctx(): any {
   };
 }
 
-test("skillsView renders groups → skills → tools + workspace rules", async () => {
+test("skillsView renders groups → skills → tools + workspace skills", async () => {
   const c = ctx();
   await skillsView(c);
   const captured = c._captured();

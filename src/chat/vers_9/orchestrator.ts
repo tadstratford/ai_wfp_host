@@ -72,7 +72,7 @@ const ALWAYS_AVAILABLE = [
   "reconcile_relationship", "list_relationships",
   "profile_data", "classify_data", "split_data",
   "report_table", "report_qbo_pnl", "report_qbo_bs",
-  "list_rules", "get_rule", "create_rule", "update_rule", "delete_rule",
+  "list_skills", "get_skill", "create_skill", "update_skill", "delete_skill",
   "run_workflow",
 ];
 

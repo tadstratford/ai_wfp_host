@@ -30,7 +30,7 @@ import { listCapabilities } from "@capabilities/registry";
 import { enabledSkillNamesForDatabase } from "@core/skills/loader";
 import { loadPrivacyMap } from "@backend/core/knowledge/index";
 import { maskText, discoverRequestValues } from "@backend/core/knowledge/autoMask";
-import { loadRules } from "@rules/loader";
+import { loadWorkspaceSkills } from "@rules/loader";
 import { ruleBriefLines } from "../../context/workspace";
 import { FilterClauseSchema, type FilterClause } from "@data/filter";
 import { resolveDataNames } from "./args";
@@ -711,7 +711,7 @@ async function analysisPlan(
   // A broad "analyze/explore this data" request (no specific aggregation, check,
   // or report) is open-ended analysis — the LLM build loop explores the tables,
   // runs per-row rule-compliance checks (judge_data), and composes findings.
-  // Defer there rather than emit a shallow list_data/list_rules inventory plan.
+  // Defer there rather than emit a shallow list_data/list_skills inventory plan.
   if (flags.explore && !flags.aggregate && !flags.report && !flags.judge && !flags.bespoke) {
     return { kind: "fallback", reason: "broad data exploration — defer to build loop", preferLoop: true };
   }
@@ -760,7 +760,7 @@ async function analysisPlan(
   // Resolve a referenced workspace rule into a deterministic filter predicate.
   // Grounded on the union of the requested sources' columns so the predicate can
   // target any of them; applied per-source below.
-  const workspaceRules = loadRules(req.databaseId);
+  const workspaceRules = loadWorkspaceSkills(req.databaseId);
   let rule: { filter?: FilterClause[]; notes?: string[] } | undefined;
   if (referencesRule(req.rawMessage, workspaceRules)) {
     const union = [...new Set(sources.flatMap((s) => inventory.find((d) => d.name === s)?.columns ?? []))];

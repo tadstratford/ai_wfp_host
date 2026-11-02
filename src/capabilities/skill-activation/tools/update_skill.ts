@@ -11,13 +11,13 @@ const toolRefSchema = z.object({
 });
 
 export default defineTool({
-  name: "update_rule",
-  description: "Updates an existing user rule. Only the fields provided are changed. Errors if the rule does not exist, or if a referenced tool does not exist.",
+  name: "update_skill",
+  description: "Updates an existing workspace skill. Only the fields provided are changed. Errors if the skill does not exist, or if a referenced tool does not exist.",
   class: "control",
   mutating: true,
   durable: true,
   inputSchema: {
-    name: z.string().describe("Name of the rule to update."),
+    name: z.string().describe("Name of the skill to update."),
     content: z.string().optional().describe("Replacement markdown body."),
     tools: z.array(toolRefSchema).optional().describe("Replacement structured tool references."),
     description: z.string().optional().describe("Replacement description."),
@@ -28,7 +28,7 @@ export default defineTool({
     const ws = requireWs();
     const existing = ws.getRule(normalized);
     if (!existing) {
-      return { content: [{ type: "text" as const, text: `Rule "${normalized}" not found.` }], isError: true };
+      return { content: [{ type: "text" as const, text: `Skill "${normalized}" not found.` }], isError: true };
     }
     if (tools) {
       const unknown = await findUnknownTools(tools as ToolRef[]);
@@ -43,7 +43,7 @@ export default defineTool({
       content: content?.trim() ? content.trim() : existing.content,
       ...(tools ? { tools: tools as ToolRef[] } : existing.tools ? { tools: existing.tools } : {}),
     });
-    notifyClients("global", "rule_update");
-    return { content: [{ type: "text" as const, text: `Rule "${normalized}" updated.` }] };
+    notifyClients("global", "skill_update");
+    return { content: [{ type: "text" as const, text: `Skill "${normalized}" updated.` }] };
   },
 });

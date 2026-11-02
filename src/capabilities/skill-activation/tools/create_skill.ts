@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { defineTool } from "../../tool";
-import { requireWs, normalizeName } from "../scope";
+import { requireWs, normalizeName, findSkill } from "../scope";
 import { notifyClients } from "@backend/interfaces/streaming/simpleSSE";
 import { findUnknownTools } from "@rules/validate";
 import type { ToolRef } from "wfp-format/rule";
@@ -11,16 +11,16 @@ const toolRefSchema = z.object({
 });
 
 export default defineTool({
-  name: "create_rule",
-  description: "Creates a new user rule in the workspace. `content` is markdown instructions/rules; `tools` is a structured list of the tools the rule's method uses. Errors if a rule with the same name already exists, or if a referenced tool does not exist.",
+  name: "create_skill",
+  description: "Creates a new workspace skill in the workspace. `content` is markdown instructions/rules; `tools` is a structured list of the tools the skill's method uses. Errors if a skill with the same name already exists, or if a referenced tool does not exist.",
   class: "control",
   mutating: true,
   durable: true,
   inputSchema: {
-    name: z.string().describe("Rule name (e.g., 'interco-rules'). Whitespace is converted to dashes and lowercased."),
+    name: z.string().describe("Skill name (e.g., 'interco-rules'). Whitespace is converted to dashes and lowercased."),
     content: z.string().describe("Markdown body: '## Instructions' steps and '## Rules' constraints."),
-    tools: z.array(toolRefSchema).optional().describe("Structured tool references the rule's method uses (each name must be a real tool)."),
-    description: z.string().optional().describe("Clear, concise summary of what this rule does."),
+    tools: z.array(toolRefSchema).optional().describe("Structured tool references the skill's method uses (each name must be a real tool)."),
+    description: z.string().optional().describe("Clear, concise summary of what this skill does."),
     tags: z.array(z.string()).optional().describe("Optional tags for grouping, e.g. ['accounting', 'reconciliation']."),
   },
   handler: async ({ name, content, description, tags, tools }) => {
@@ -29,8 +29,8 @@ export default defineTool({
       return { content: [{ type: "text" as const, text: "name and content are required." }], isError: true };
     }
     const ws = requireWs();
-    if (ws.getRule(normalized)) {
-      return { content: [{ type: "text" as const, text: `Rule "${normalized}" already exists. Use update_rule to change it.` }], isError: true };
+    if (findSkill(normalized)) {
+      return { content: [{ type: "text" as const, text: `Skill "${normalized}" already exists. Use update_skill to change it.` }], isError: true };
     }
     const refs: ToolRef[] | undefined = tools && tools.length > 0 ? tools : undefined;
     if (refs) {
@@ -46,7 +46,7 @@ export default defineTool({
       ...(refs ? { tools: refs } : {}),
       content: content.trim(),
     });
-    notifyClients("global", "rule_update");
-    return { content: [{ type: "text" as const, text: `Rule "${normalized}" created.` }] };
+    notifyClients("global", "skill_update");
+    return { content: [{ type: "text" as const, text: `Skill "${normalized}" created.` }] };
   },
 });

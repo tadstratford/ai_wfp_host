@@ -7,8 +7,12 @@
 import type { Rule } from "wfp-format/rule";
 import { getSessionByDatabaseId } from "@backend/core/workspace/workspaceSessionStore";
 
-export function loadRules(databaseId: string): Rule[] {
+/** Load the workspace's own skills (source: "workspace"). */
+export function loadWorkspaceSkills(databaseId: string): Rule[] {
   const ws = getSessionByDatabaseId(databaseId);
   if (!ws) return [];
   return ws.getRules();
 }
+
+/** @deprecated alias for `loadWorkspaceSkills` — kept for the migration. */
+export const loadRules = loadWorkspaceSkills;

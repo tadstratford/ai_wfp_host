@@ -1,5 +1,5 @@
 import type { Session } from "@backend/types";
-import { loadRules } from "@rules/loader";
+import { loadWorkspaceSkills } from "@rules/loader";
 
 /**
  * Flatten a chat session into a "worked example" spec that the conversion
@@ -59,7 +59,7 @@ export function specFromSession(session: Session, databaseId?: string): string {
   }
 
   if (databaseId) {
-    const rules = loadRules(databaseId);
+    const rules = loadWorkspaceSkills(databaseId);
     if (rules.length > 0) {
       lines.push("## Workspace rules");
       for (const r of rules) {

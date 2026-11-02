@@ -3,7 +3,7 @@ import { userManager } from "@backend/core/admin/userManager";
 import { ensureEnabledSkillGroups } from "@backend/core/admin/skillGroupsService";
 import { getToolsList } from "@core/tools/registry";
 import { loadAllSkills } from "../../core/skills/loader";
-import { loadRules } from "../../rules/loader";
+import { loadWorkspaceSkills } from "../../rules/loader";
 
 export interface ContextManifest {
   workspaceName: string;
@@ -120,7 +120,7 @@ export async function buildManifest(
     areaContext = [];
 
     // Workspace persona removed — WFP workspace rules (wfp.rules[]) are now the
-    // workspace's cross-cutting rules/preferences (see loadRules).
+    // workspace's cross-cutting rules/preferences (see loadWorkspaceSkills).
 
     // Data files
     for (const name of session.getDataNames()) {
@@ -179,7 +179,7 @@ export async function buildManifest(
   // Rules — workspace-authored rules from wfp.rules[]
   let rules: RuleSummary[] = [];
   try {
-    rules = loadRules(databaseId).map((r) => ({
+    rules = loadWorkspaceSkills(databaseId).map((r) => ({
       name: r.name,
       tags: r.tags ?? [],
     }));

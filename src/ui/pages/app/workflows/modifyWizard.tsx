@@ -6,7 +6,7 @@ import { callLLM } from "@backend/core/llm/llm-client";
 import { loadPrompt } from "@chat/prompts/loader";
 import { markdownToHtml } from "@backend/utilities/markdownToHtml";
 import { getToolsList } from "@core/tools/registry";
-import { loadRules } from "@rules/loader";
+import { loadWorkspaceSkills } from "@rules/loader";
 import { Stepper, WizIcon, FIELD_HEAD, ErrCard } from "./wizardPage";
 
 /**
@@ -395,7 +395,7 @@ async function buildModifyPlan(state: ModifyState): Promise<ModifyPlan> {
     ? tools.map((t) => `- ${t.tool_id} — ${t.name}${t.description ? `: ${t.description}` : ""}`).join("\n")
     : "No tools available.";
 
-  const rules = loadRules(state.databaseId);
+  const rules = loadWorkspaceSkills(state.databaseId);
   const rulesSection = rules.length
     ? rules.map((s) => `### ${s.name}\n${s.content}`).join("\n\n")
     : "No workspace rules.";

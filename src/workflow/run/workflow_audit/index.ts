@@ -30,7 +30,7 @@ export const Tool_run = async (api: WFP_API): Promise<Result> => {
     return { status: 'error', error: 'workflow_audit requires an active workflow.' };
   }
 
-  const workspaceRules = api.getRules?.() ?? [];
+  const workspaceRules = api.getSkills?.() ?? [];
   const presentedRules = workflow.description ?? '';
 
   if (workspaceRules.length === 0 && !presentedRules.trim()) {

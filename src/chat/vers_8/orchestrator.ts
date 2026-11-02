@@ -8,7 +8,7 @@ import { callProvider } from "@backend/core/llm/providers";
 import type { ProviderMessage, ProviderToolSchema } from "@backend/core/llm/providers";
 import { getClassifierKey } from "@backend/core/user/getLLMApiKey";
 import { runStreamRuleAudit } from "@backend/core/knowledge/classifierAudit";
-import { loadRules } from "../../rules/loader";
+import { loadWorkspaceSkills } from "../../rules/loader";
 import { getSession, updateSession, saveSession } from "@backend/core/session/sessions/session_all";
 import { summarizeJudgeResult } from "@backend/core/session/judgeSummary";
 import { getSessionByDatabaseId } from "@backend/core/workspace/workspaceSessionStore";
@@ -536,8 +536,8 @@ const ALWAYS_AVAILABLE = [
   "reconcile_relationship", "list_relationships",
   "profile_data", "classify_data", "split_data",
   "report_table", "report_qbo_pnl", "report_qbo_bs",
-  "list_rules", "get_rule",
-  "create_rule", "update_rule", "delete_rule",
+  "list_skills", "get_skill",
+  "create_skill", "update_skill", "delete_skill",
   "run_workflow",
   ...QBO_READ_TOOLS,
   ...PLANNING_READ_TOOLS,
@@ -559,8 +559,8 @@ const COMPOSABLE_PRIMITIVES = [
 const FAST_PATH_TOOLS = new Set([
   "get_data", "list_data", "aggregate_data",
   "get_email", "get_email_attachment_content", "get_email_attachments", "get_emails",
-  "get_rule", "get_workflow", "get_workspace_info", "get_workspace_notes",
-  "list_rules", "list_todos", "list_workflows",
+  "get_skill", "get_workflow", "get_workspace_info", "get_workspace_notes",
+  "list_skills", "list_todos", "list_workflows",
   ...QBO_READ_TOOLS,
   ...PLANNING_READ_TOOLS,
 ]);
@@ -783,7 +783,7 @@ const AUDIT_STATUS_LABELS: Record<string, string> = {
  *  (guardrails, etc.) are enforced upstream by the write gate + system prompt,
  *  so the audit targets the user's own rules. */
 async function auditChatPlan(io: OrchestratorIO, stream: string): Promise<void> {
-  const workspaceRules = loadRules(io.databaseId);
+  const workspaceRules = loadWorkspaceSkills(io.databaseId);
   if (workspaceRules.length === 0) return;
 
   let classifierKey: string;

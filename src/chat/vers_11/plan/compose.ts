@@ -34,7 +34,7 @@ const NON_COMPOSABLE = new Set([
   "select_skill", "list_skills",
   "create_workflow", "update_workflow", "delete_workflow",
   "add_node", "update_node", "delete_node", "reorder_nodes",
-  "create_rule", "update_rule", "delete_rule",
+  "create_skill", "update_skill", "delete_skill",
 ]);
 
 /** Read tools whose `name`-like parameter refers to a workspace data entry. */

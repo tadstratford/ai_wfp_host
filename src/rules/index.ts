@@ -1,2 +1,2 @@
-export { loadRules } from "./loader";
+export { loadWorkspaceSkills, loadRules } from "./loader";
 export { getRules, getRule, upsertRule, deleteRule } from "./store";
