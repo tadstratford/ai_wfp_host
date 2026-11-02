@@ -11,7 +11,7 @@ The document has two halves: the **work product** (content) and the **record**
 | `workflows[]` | The procedures — close, reconciliation, review — as repeatable steps |
 | `tools[]` | Tool definitions the workflows reference |
 | `data{}` | The books and working papers — named data entries || `knowledge[]` | Reference packs the workflows and chat consult |
-| `rules[]` | User-authored rules and guardrails |
+| `skills[]` | User-authored skills and guardrails (formerly `rules[]`) |
 | `sessions[]` | The record of chat and automation runs |
 | `plan[]`, `todos[]`, `saved_prompts[]` | Working state: plans, task lists, saved prompts |
 

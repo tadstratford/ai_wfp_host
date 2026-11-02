@@ -55,7 +55,7 @@ export async function reconstructWfp(
   const workflows: unknown[] = [];
   const tools: unknown[] = [];
   const knowledge: unknown[] = [];
-  const rules: unknown[] = [];
+  const skills: unknown[] = [];
   const sessions: unknown[] = [];
   const logs: unknown[] = [];
 
@@ -75,7 +75,7 @@ export async function reconstructWfp(
       case "workflow": workflows.push(value); break;
       case "tool": tools.push(value); break;
       case "knowledge": knowledge.push(value); break;
-      case "rule": rules.push(value); break;
+      case "rule": skills.push(value); break;
       case "session": sessions.push(value); break;
       case "log": logs.push(value); break;
       case "plan": wfp.plan = value as WfpFile["plan"]; break;
@@ -90,7 +90,7 @@ export async function reconstructWfp(
   if (workflows.length) wfp.workflows = workflows as WfpFile["workflows"];
   if (tools.length) wfp.tools = tools as WfpFile["tools"];
   if (knowledge.length) wfp.knowledge = knowledge as WfpFile["knowledge"];
-  if (rules.length) wfp.rules = rules as WfpFile["rules"];
+  if (skills.length) wfp.skills = skills as WfpFile["skills"];
   if (sessions.length) wfp.sessions = sessions as WfpFile["sessions"];
   if (logs.length) wfp.logs = logs as WfpFile["logs"];
 

@@ -19,11 +19,6 @@ import {
   shellChatUrl,
 } from "@frontend/pages/app/shellUrls";
 import { Composer } from "./composer";
-import { SavedPrompts } from "./SavedPrompts";
-import { Capabilities } from "./Capabilities";
-import { DataRefs } from "./DataRefs";
-import { listSavedPrompts } from "@backend/core/workspace/savedPrompts";
-import { listUserData } from "@backend/core/user-data/index";
 import { listEmails } from "@backend/core/workspace/emailInbox/store";
 import { listSentEmails } from "@backend/core/workspace/emailInbox/outbound";
 
@@ -226,15 +221,12 @@ export async function renderChatContent(
     workflowId || session.workflow_id || session.activeWorkflowId || null,
   );
 
-  const savedPrompts = user.currentDatabaseId ? listSavedPrompts(user.currentDatabaseId) : [];
-  const dataItems = user.currentDatabaseId ? await listUserData(user.currentDatabaseId) : [];
-
   const hasContent = (session.messages ?? []).some(
     (m: any) => m.role === "user" && (m.markdown || "").trim(),
   ) || (Array.isArray((session.metadata as any)?.toolCalls) && (session.metadata as any).toolCalls.length > 0);
 
   return (
-    <div class="max-w-6xl mx-auto px-4 md:px-6 pt-6 md:pt-8">
+    <div class="max-w-7xl mx-auto px-4 md:px-6 pt-6 md:pt-8">
       <div class="flex items-start gap-6">
         <div class="flex-1 min-w-0">
       {/* Hidden input to track current session ID for SSE filtering */}
@@ -357,27 +349,6 @@ export async function renderChatContent(
         todoId={todoId}
         prefill={prefill}
       />
-        </div>
-        <div class="hidden lg:flex w-72 shrink-0 flex-col gap-4 sticky top-0">
-          <div
-            id="plan-rail"
-            hx-get={`/sessions/api/plan?sessionId=${session.session_id}`}
-            hx-trigger="load, sse:new_message from:closest [sse-connect], sse:workflow_complete from:closest [sse-connect]"
-            hx-swap="innerHTML"
-          ></div>
-          <Capabilities />
-          <aside id="saved-prompts" class="min-h-0">
-            <SavedPrompts prompts={savedPrompts} />
-          </aside>
-          <div
-            id="data-refs"
-            class="min-h-0"
-            hx-get="/sessions/api/data-refs"
-            hx-trigger="load"
-            hx-swap="innerHTML"
-          >
-            <DataRefs items={dataItems} />
-          </div>
         </div>
       </div>
     </div>

@@ -87,6 +87,15 @@ interface PendingPause {
 function normalizeWfp(wfp: WfpFile): WfpFile {
   const raw = wfp as unknown as Record<string, unknown>;
   if ("qbo" in raw) delete raw.qbo;
+  // Migrate the legacy `rules[]` node → `skills[]` (workspace-authored skills),
+  // stamping `source: "workspace"`. `skills` wins when both are present.
+  if (Array.isArray(raw.rules) && !raw.skills) {
+    raw.skills = (raw.rules as Array<Record<string, unknown>>).map((r) => ({
+      ...r,
+      source: r.source ?? "workspace",
+    }));
+  }
+  delete raw.rules;
   return wfp;
 }
 
@@ -761,7 +770,7 @@ export class WorkspaceSession {
       case "workflow": return this.#wfp.workflows?.find((w) => w.id === name) ?? null;
       case "tool": return this.#wfp.tools?.find((t) => t.tool_id === name) ?? null;
       case "knowledge": return this.#wfp.knowledge?.find((p) => p.name === name) ?? null;
-      case "rule": return this.#wfp.rules?.find((r) => r.name === name) ?? null;
+      case "rule": return this.#wfp.skills?.find((s) => s.name === name) ?? null;
       case "session": return this.#wfp.sessions?.find((s) => s.id === name) ?? null;
       case "log": return this.#wfp.logs?.find((l) => l.id === name) ?? null;
       case "metadata": return this.#wfp.metadata ?? null;

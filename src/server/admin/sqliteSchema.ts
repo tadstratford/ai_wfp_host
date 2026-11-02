@@ -120,6 +120,7 @@ CREATE INDEX IF NOT EXISTS idx_shared_workflows_examples ON shared_workflows(is_
 CREATE TABLE IF NOT EXISTS site_visits (
   id         TEXT PRIMARY KEY,
   page       TEXT NOT NULL,
+  host       TEXT NOT NULL,
   created_at TEXT DEFAULT ${NOW}
 );
 CREATE INDEX IF NOT EXISTS idx_site_visits_page_created ON site_visits(page, created_at);
@@ -280,4 +281,67 @@ CREATE TABLE IF NOT EXISTS beta_codes (
   created_at      TEXT DEFAULT ${NOW}
 );
 CREATE INDEX IF NOT EXISTS idx_beta_codes_status ON beta_codes(status);
+
+-- skill_groups — the canonical set of skill-group ids (capabilities). Seeded at
+-- startup from @shared/skillGroups; skills reference these via frontmatter
+-- group: and a workspace's enabled set references the same ids.
+CREATE TABLE IF NOT EXISTS skill_groups (
+  id          TEXT PRIMARY KEY,
+  label       TEXT NOT NULL,
+  description TEXT,
+  always_on   INTEGER DEFAULT 0,
+  default_on  INTEGER DEFAULT 0,
+  sort_order  INTEGER DEFAULT 0
+);
+
+-- catalog_skills — server-wide skill catalog (name, description, content, and
+-- the group it belongs to). Materialized from the skill markdown at startup.
+CREATE TABLE IF NOT EXISTS catalog_skills (
+  name        TEXT PRIMARY KEY,
+  description TEXT,
+  scope       TEXT,
+  tags        TEXT,
+  content     TEXT,
+  group_id    TEXT
+);
+
+-- catalog_tools — server-wide tool catalog (name, description, class, owning
+-- capability). Materialized from the capability registry at startup.
+CREATE TABLE IF NOT EXISTS catalog_tools (
+  name           TEXT PRIMARY KEY,
+  description    TEXT,
+  class          TEXT,
+  capability_key TEXT
+);
+
+-- catalog_skill_tools — which tools each skill declares (role is the skill's
+-- short note). Materialized at startup from skill frontmatter / ## Tools needed.
+CREATE TABLE IF NOT EXISTS catalog_skill_tools (
+  skill_name TEXT NOT NULL,
+  tool_name  TEXT NOT NULL,
+  role       TEXT,
+  PRIMARY KEY (skill_name, tool_name)
+);
+
+-- catalog_stories — server-wide story (meta-plan) catalog. Materialized at
+-- startup from story markdown. nouls is a JSON string (id → instructions).
+CREATE TABLE IF NOT EXISTS catalog_stories (
+  name        TEXT PRIMARY KEY,
+  description TEXT,
+  nouls       TEXT
+);
+
+-- catalog_beats — the ordered beats each story walks. skill_name is the
+-- authoritative skill (tools follow via catalog_skill_tools); NULL = all skills
+-- (the generic catch-all). template is a stable id mapping to a code builder.
+CREATE TABLE IF NOT EXISTS catalog_beats (
+  story_name  TEXT NOT NULL,
+  beat_id     TEXT NOT NULL,
+  sort_order  INTEGER DEFAULT 0,
+  skill_name  TEXT,
+  template    TEXT,
+  verify      TEXT,
+  write       INTEGER DEFAULT 0,
+  PRIMARY KEY (story_name, beat_id)
+);
 `;

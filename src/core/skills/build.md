@@ -1,5 +1,6 @@
 ---
 name: build
+group: core
 description: Execute plans and user requests in build mode. Never builds workflows in chat — directs users to the Make Workflow tool.
 ---
 

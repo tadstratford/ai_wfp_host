@@ -82,6 +82,8 @@ export interface ComposeInput {
   complexity: number;
   lastRequest?: string;
   clarifiedParams?: Record<string, unknown>;
+  /** Selected story (meta-plan) archetype id — passed through to the planner. */
+  story?: string;
 }
 
 export async function composePlan(input: ComposeInput): Promise<TurnPlan> {
@@ -109,6 +111,7 @@ export async function composePlan(input: ComposeInput): Promise<TurnPlan> {
     mutating: input.mutating,
     clarifiedParams: input.clarifiedParams,
     guidance,
+    story: input.story,
   };
 
   // cascade → llm. No free-form loop: every request is a plan. Planner calls are
@@ -166,6 +169,7 @@ export async function composePlan(input: ComposeInput): Promise<TurnPlan> {
     tool: s.tool_id,
     args: s.tool_parameters,
     label: s.label || s.tool_id,
+    ...(s.beat ? { beat: s.beat } : {}),
     durable: isDurableTool(s.tool_id),
     status: "pending",
   }));
@@ -279,7 +283,11 @@ export async function composePlan(input: ComposeInput): Promise<TurnPlan> {
     id: `plan-${Date.now().toString(36)}`,
     steps: assembled,
     cursor: 0,
-    provenance: { skills: input.selectedSkills, rules: input.selectedRules.map((r) => r.rule) },
+    provenance: {
+      skills: input.selectedSkills,
+      rules: input.selectedRules.map((r) => r.rule),
+      report: result.report,
+    },
     createdAt: new Date().toISOString(),
   };
 }

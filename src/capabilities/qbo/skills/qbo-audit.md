@@ -1,5 +1,6 @@
 ---
 name: qbo-audit
+group: qbo
 description: Audit QuickBooks Online journal entries against deterministic and LLM-judged rules. Connect to QBO, fetch journals, evaluate each rule, and produce pass/fail verdicts per entry.
 tools: [{"name":"qbo_journal_entries","role":"fetch QBO journal entries"},{"name":"set_param","role":"store results"},{"name":"get_param","role":"retrieve results"},{"name":"show_message","role":"display findings"}]
 ---

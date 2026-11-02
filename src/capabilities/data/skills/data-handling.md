@@ -1,5 +1,6 @@
 ---
 name: data-handling
+group: core
 description: Work with workspace data files — list, read, transform, and store structured data with WFP typed parameters.
 tools: [{"name":"list_data","role":"read workspace data files"},{"name":"get_data","role":"read workspace data files"},{"name":"aggregate_data","role":"group and aggregate a data file (sum/count/avg/min/max)"},{"name":"resolve_data_shape","role":"resolve a raw sheet (json_cells) into a clean flat table"},{"name":"check_data","role":"yes/no checks over the whole dataset with the typed Classifier"},{"name":"compare_data","role":"reconcile two tabular files on shared keys"},{"name":"list_relationships","role":"list discovered cross-table links"},{"name":"reconcile_relationship","role":"reconcile two tables on a discovered link"},{"name":"save_data","role":"persist the staging summary table"},{"name":"report_table","role":"deterministic drill-down HTML report"},{"name":"chat_download","role":"deliver the finished HTML report"},{"name":"set_param","role":"typed state management"},{"name":"get_param","role":"typed state management"},{"name":"show_message","role":"present results to the user"}]
 ---

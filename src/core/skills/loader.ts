@@ -12,9 +12,8 @@ import * as fs from "fs";
 import * as path from "path";
 import type { Skill, SkillScope } from "wfp-format/skill";
 import {
-  CORE_SKILLS,
+  ALWAYS_ON_GROUP_KEYS,
   DEFAULT_SKILL_GROUP_KEYS,
-  skillNamesForGroups,
 } from "@shared/skillGroups";
 
 export interface SkillWithSource extends Skill {
@@ -36,12 +35,25 @@ export function setEnabledGroupsForDatabase(
   enabledGroupsByDatabase.set(databaseId, groupKeys);
 }
 
-/** The concrete skill names a database may use, from its groups (or defaults). */
-export function enabledSkillNamesForDatabase(databaseId?: string): Set<string> {
-  const groups = databaseId
+/** The concrete group keys a database may use, always-on core always included. */
+export function enabledGroupKeysForDatabase(databaseId?: string): Set<string> {
+  const stored = databaseId
     ? enabledGroupsByDatabase.get(databaseId)
     : undefined;
-  return new Set(skillNamesForGroups(groups ?? DEFAULT_SKILL_GROUP_KEYS));
+  const keys = new Set<string>(ALWAYS_ON_GROUP_KEYS);
+  for (const k of stored ?? DEFAULT_SKILL_GROUP_KEYS) keys.add(k);
+  return keys;
+}
+
+/** The concrete skill names a database may use, derived from each skill's
+ *  frontmatter `group` against the effective enabled group keys. */
+export function enabledSkillNamesForDatabase(databaseId?: string): Set<string> {
+  const keys = enabledGroupKeysForDatabase(databaseId);
+  return new Set(
+    loadAppSkills()
+      .filter((s) => !s.group || keys.has(s.group))
+      .map((s) => s.name),
+  );
 }
 
 /** Directories that hold skill markdown: core skills + every capability's
@@ -89,6 +101,7 @@ export function loadAppSkills(databaseId?: string): SkillWithSource[] {
           description: parsed.description,
           scope: (parsed.scope as SkillScope) || undefined,
           tags: parsed.tags || [],
+          group: parsed.group,
           content: parsed.content,
           tools: parsed.tools,
           source: "app",
@@ -99,10 +112,10 @@ export function loadAppSkills(databaseId?: string): SkillWithSource[] {
     }
   }
 
-  const enabled = databaseId ? enabledSkillNamesForDatabase(databaseId) : null;
+  const enabledGroups = databaseId ? enabledGroupKeysForDatabase(databaseId) : null;
 
   return skills.filter((s) => {
-    if (enabled && !enabled.has(s.name) && !CORE_SKILLS.has(s.name)) return false;
+    if (enabledGroups && s.group && !enabledGroups.has(s.group)) return false;
     return true;
   });
 }
@@ -143,6 +156,7 @@ function parseFrontmatter(raw: string): {
   description?: string;
   scope?: string;
   tags?: string[];
+  group?: string;
   tools?: { name: string; role?: string }[];
   content: string;
 } {
@@ -181,6 +195,7 @@ function parseFrontmatter(raw: string): {
     description: result.description,
     scope: result.scope,
     tags: result.tags,
+    group: result.group,
     tools: parseTools(result.tools),
     content,
   };

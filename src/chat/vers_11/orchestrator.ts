@@ -25,12 +25,13 @@ import { ensureEnabledSkillGroups } from "@backend/core/admin/skillGroupsService
 import type { OrchestratorIO } from "./types";
 import { selectRules } from "./select";
 import { classifyRule } from "./classifyRule";
+import { selectArchetype } from "./story/select";
 import { composePlan } from "./composePlan";
 import { executePlan, emitPlanMessage, persistPlan } from "./executePlan";
 import { resumePlan } from "./resume";
 import { persistClarifiedParams } from "./plan/clarify";
-import { getCapabilityIndex } from "@mcp/capabilityIndex";
-import type { ClassifiedRule, DataStep, SelectedRule, TurnPlan } from "./types";
+import { loadConfig } from "./config";
+import type { ClassifiedRule, SelectedRule, TurnPlan } from "./types";
 import type { MetaData } from "wfp-api";
 
 const GUARDRAILS_SKILL = "guardrails";
@@ -139,6 +140,37 @@ export async function processUserMessage(
 
   await ensureEnabledSkillGroups(io.databaseId);
 
+  // ── Story (meta-plan) selection ──────────────────────────────────────────
+  // Jev picks the story archetype (audit-review vs quick-fact) FIRST — it is the
+  // meta-plan, so it is decided before skills/tools. Selection only for now: the
+  // result is recorded in the plan's provenance; running the beats is a later
+  // phase.
+  const story = await selectArchetype(io.databaseId, io.userId, rawMessage, {
+    sessionId: io.sessionId,
+    mode: io.mode,
+  });
+
+  if (io.verbose) {
+    const storyPrompt = "Figuring out what story this is…";
+    const storyCfg = loadConfig().story;
+    await io.addMessage({
+      markdown:
+        `**${storyPrompt}**\n` +
+        story.options.map((o) => `- ${o.id} (${Math.round(o.prob * 100)}%)`).join("\n"),
+      json: {
+        kind: "thinking",
+        stage: "story-options",
+        prompt: storyPrompt,
+        options: story.options.map((o) => ({ name: o.id, description: o.description, prob: o.prob })),
+        limits: { threshold: storyCfg.archetypeProbThreshold, max: storyCfg.maxArchetypes, label: "stories" },
+      },
+    });
+    await io.addMessage({
+      markdown: story.archetype ? `Story: \`${story.archetype.id}\`` : "Story: none",
+      json: { kind: "thinking", stage: "story-outcome", story: story.archetype?.id ?? null },
+    });
+  }
+
   // ── Skill routing ─────────────────────────────────────────────────────────
   const decision = await route(io.databaseId, io.userId, rawMessage, {
     lastRequest: meta.lastRequest,
@@ -164,6 +196,7 @@ export async function processUserMessage(
   // routing result already computed above.
   if (io.verbose) {
     const classifyPrompt = "Figuring out what type of problem this is…";
+    const routingCfg = loadConfig().routing;
     const options = decision.skills.slice(0, CLASSIFY_OPTIONS_MAX).map((s) => ({
       name: s.name,
       description: s.description,
@@ -173,7 +206,13 @@ export async function processUserMessage(
       markdown:
         `**${classifyPrompt}**\n` +
         options.map((o) => `- ${o.name} (${Math.round(o.prob * 100)}%)`).join("\n"),
-      json: { kind: "thinking", stage: "classify-options", prompt: classifyPrompt, options },
+      json: {
+        kind: "thinking",
+        stage: "classify-options",
+        prompt: classifyPrompt,
+        options,
+        limits: { threshold: routingCfg.skillProbThreshold, max: routingCfg.maxSkills, label: "skills" },
+      },
     });
     await io.addMessage({
       markdown: `Picked: ${routedSkills.map((s) => `\`${s}\``).join(", ")}`,
@@ -200,6 +239,7 @@ export async function processUserMessage(
     // candidate rules with relevance scores, then the applying rules + tier.
     if (ruleOptions.length > 0) {
       const rulesPrompt = "Figuring out which workspace rules apply…";
+      const rulesCfg = loadConfig().rules;
       const ruleOptionList = ruleOptions.slice(0, RULE_OPTIONS_MAX).map((o) => ({
         name: o.name,
         description: o.description,
@@ -209,7 +249,18 @@ export async function processUserMessage(
         markdown:
           `**${rulesPrompt}**\n` +
           ruleOptionList.map((o) => `- ${o.name} (${Math.round(o.prob * 100)}%)`).join("\n"),
-        json: { kind: "thinking", stage: "rules-options", prompt: rulesPrompt, options: ruleOptionList },
+        json: {
+          kind: "thinking",
+          stage: "rules-options",
+          prompt: rulesPrompt,
+          options: ruleOptionList,
+          limits: {
+            threshold: rulesCfg.probThreshold,
+            tagThreshold: rulesCfg.tagThreshold,
+            max: rulesCfg.maxRules,
+            label: "rules",
+          },
+        },
       });
     }
     if (classified.length > 0) {
@@ -258,28 +309,34 @@ export async function processUserMessage(
     complexity: decision.complexity,
     lastRequest: meta.lastRequest,
     clarifiedParams: meta.clarifiedParams,
+    story: story.archetype?.id,
   });
 
   const reviewShaped = routedSkills.includes("data-account-check");
 
-  // ── Thinking stream: the tools the plan will use ───────────────────────────
-  // The plan's data steps name the tools drawn from the routed skills' declared
-  // tools (plus the selected rules' method tools). Surface them with their
-  // descriptions so the "thought" behind each tool is visible, before they run.
+  // Record the selected story in the plan's provenance (consumed by the beat
+  // loop in a later phase).
+  if (story.archetype) {
+    plan.provenance.story = story.archetype.id;
+    plan.provenance.beats = story.archetype.beats.map((b) => b.id);
+  }
+
+  // ── Thinking stream: the plan the request will run ─────────────────────────
+  // The plan's steps name the tools (drawn from the picked skills) + args. Show
+  // them inline as the "here's the plan" beat; the right rail keeps the live
+  // checklist.
   if (io.verbose) {
-    const planTools = plan.steps.filter((s): s is DataStep => s.kind === "data" && !s.ruleCheck);
-    if (planTools.length > 0) {
-      const capability = await getCapabilityIndex();
-      const tools = planTools.map((s) => ({
-        name: s.tool,
-        label: s.label,
-        description: capability.tools.get(s.tool)?.description,
-      }));
+    const planSteps = plan.steps.map((s) =>
+      s.kind === "data"
+        ? { kind: "data", label: s.label, tool: s.tool, args: s.args }
+        : s.kind === "control"
+          ? { kind: "control", control: s.control, prompt: s.prompt }
+          : { kind: "communication", label: s.message?.markdown ?? "message" },
+    );
+    if (planSteps.length > 0) {
       await io.addMessage({
-        markdown:
-          `**Tools:**\n` +
-          tools.map((t) => `- ${t.name}${t.label && t.label !== t.name ? ` — ${t.label}` : ""}`).join("\n"),
-        json: { kind: "thinking", stage: "tools", tools },
+        markdown: `**Plan**\n${plan.steps.map((s, i) => `${i + 1}. ${s.kind === "data" ? s.label : s.kind === "control" ? s.control : "message"}`).join("\n")}`,
+        json: { kind: "thinking", stage: "plan", steps: planSteps },
       });
     }
   }

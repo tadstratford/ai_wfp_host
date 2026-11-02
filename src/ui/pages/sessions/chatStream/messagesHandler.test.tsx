@@ -15,7 +15,7 @@ mock.module("@backend/core/session/sessions/session_all", () => ({
       { id: "m7", role: "assistant", source: "vers_11", markdown: "Picked: report-authoring", json: { kind: "thinking", stage: "classify-outcome", chosen: ["report-authoring", "data-account-check"] } },
       { id: "m8", role: "assistant", source: "vers_11", markdown: "Figuring out which workspace rules apply…", json: { kind: "thinking", stage: "rules-options", prompt: "Figuring out which workspace rules apply…", options: [{ name: "shared-services-allocation", prob: 1 }] } },
       { id: "m9", role: "assistant", source: "vers_11", markdown: "Rules applying: shared-services-allocation (audit)", json: { kind: "thinking", stage: "rules-outcome", rules: [{ name: "shared-services-allocation", tier: "audit", prob: 1 }] } },
-      { id: "m10", role: "assistant", source: "vers_11", markdown: "Tools: list_data", json: { kind: "thinking", stage: "tools", tools: [{ name: "list_data", label: "list_data", description: "List available data" }] } },
+      { id: "m10", role: "assistant", source: "vers_11", markdown: "Plan", json: { kind: "thinking", stage: "plan", steps: [{ kind: "data", label: "Read 10 tables", tool: "get_data", args: { names: ["a", "b"] } }, { kind: "control", control: "approval" }] } },
     ],
   }),
   updateSession: async () => {},
@@ -67,7 +67,9 @@ test("thinking messages render as content, not noise", async () => {
   expect(captured).toContain("Figuring out which workspace rules apply…");
   expect(captured).toContain("shared-services-allocation");
   expect(captured).toContain("Rules applying:");
-  expect(captured).toContain("Tools");
-  expect(captured).toContain("List available data");
+  expect(captured).toContain("Plan");
+  expect(captured).toContain("Read 10 tables");
+  expect(captured).toContain("get_data");
+  expect(captured).toContain("approval");
   expect(captured).toContain("Process details (3)");
 });

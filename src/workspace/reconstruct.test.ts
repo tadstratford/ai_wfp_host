@@ -64,7 +64,7 @@ describe("reconstructWfp", () => {
     const wfp = await reconstructWfp(state, load, "dh");
     expect(wfp.metadata.workspace).toBe("Acme");
     expect(wfp.workflows?.length).toBe(1);
-    expect(wfp.rules?.length).toBe(1);
+    expect(wfp.skills?.length).toBe(1);
     expect(wfp.data).toEqual({ ap: { content: "a,b" } });
   });
 });

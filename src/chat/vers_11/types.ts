@@ -77,6 +77,8 @@ export interface DataStep {
   tool: string;
   args: Record<string, unknown>;
   label: string;
+  /** The story beat this step belongs to (drives the story-progress checklist). */
+  beat?: string;
   /** Durable, reusable workflow step (recorded for "save as workflow"). */
   durable?: boolean;
   /** Rule name when this step is a rule-enforcement check (drives the gate). */
@@ -109,7 +111,7 @@ export interface TurnPlan {
   steps: Step[];
   /** Index of the next step to execute — the "maintain" anchor. */
   cursor: number;
-  provenance: { skills: string[]; rules: SelectedRule[] };
+  provenance: { skills: string[]; rules: SelectedRule[]; story?: string; report?: boolean; beats?: string[] };
   createdAt: string;
 }
 

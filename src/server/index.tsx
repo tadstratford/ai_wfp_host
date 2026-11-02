@@ -18,6 +18,7 @@ import { EDITION, AUTH_MODE, dbBackend } from "@shared/edition";
 import { hashPassword } from "@backend/core/crypto/hash";
 import { initDbBackend } from "@backend/core/admin/supabase";
 import { dbFilePath } from "@backend/core/admin/sqlite";
+import { materializeCatalog } from "@backend/catalog";
 import { resolve } from "node:path";
 
 const app = new Hono();
@@ -225,6 +226,16 @@ app.route("/admin", adminRouter);
     await initMcp();
   } catch (error) {
     console.error("[Startup] MCP init failed:", error);
+  }
+
+  // Materialize the server-wide skill/tool catalog into SQLite. Runs after MCP
+  // init so the capability registry is populated (tools follow the registry).
+  if (backend === "sqlite") {
+    try {
+      await materializeCatalog();
+    } catch (error) {
+      console.error("[Startup] Catalog materialization failed:", error);
+    }
   }
 
   // Cleanup expired shared workflows on startup and every 6 hours.

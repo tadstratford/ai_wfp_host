@@ -30,6 +30,7 @@ const JSON_COLUMNS: Record<string, string[]> = {
   inbound_email_addresses: ["allowlisted_senders", "outbound_allowlist"],
   user_email_addresses: ["allowlisted_senders", "outbound_allowlist"],
   inbound_emails: ["entry"],
+  catalog_skills: ["tags"],
 };
 
 // BOOLEAN columns → stored as INTEGER 0/1; hydrated back to booleans.
@@ -37,6 +38,7 @@ const BOOL_COLUMNS: Record<string, string[]> = {
   shared_workflows: ["is_example"],
   inbound_email_addresses: ["enabled"],
   user_email_addresses: ["enabled"],
+  skill_groups: ["always_on", "default_on"],
 };
 
 // Primary keys per table — used by upsert (ON CONFLICT target).
@@ -59,6 +61,12 @@ const PRIMARY_KEYS: Record<string, string[]> = {
   workspace_grants: ["grant_id"],
   signup_allowlist: ["email"],
   beta_codes: ["code"],
+  skill_groups: ["id"],
+  catalog_skills: ["name"],
+  catalog_tools: ["name"],
+  catalog_skill_tools: ["skill_name", "tool_name"],
+  catalog_stories: ["name"],
+  catalog_beats: ["story_name", "beat_id"],
 };
 
 let db: Database | null = null;
@@ -78,6 +86,12 @@ export function getDb(): Database {
   db.run("PRAGMA busy_timeout = 5000;");
   db.run("PRAGMA foreign_keys = ON;");
   db.exec(SQLITE_SCHEMA_DDL);
+  // SQLite has no `ADD COLUMN IF NOT EXISTS`; fold post-create column rollouts
+  // here so existing databases pick up new columns without a rebuild.
+  const siteVisitsCols = db.prepare(`PRAGMA table_info(site_visits)`).all() as { name: string }[];
+  if (!siteVisitsCols.some((c) => c.name === "host")) {
+    db.run(`ALTER TABLE site_visits ADD COLUMN host TEXT`);
+  }
   return db;
 }
 

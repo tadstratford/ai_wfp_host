@@ -194,8 +194,11 @@ CREATE INDEX IF NOT EXISTS idx_shared_workflows_examples ON shared_workflows(is_
 CREATE TABLE IF NOT EXISTS site_visits (
   id TEXT PRIMARY KEY,
   page TEXT NOT NULL,
+  host TEXT NOT NULL,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+ALTER TABLE site_visits ADD COLUMN IF NOT EXISTS host TEXT;
 
 -- Index for reporting by page and time
 CREATE INDEX IF NOT EXISTS idx_site_visits_page_created ON site_visits(page, created_at);

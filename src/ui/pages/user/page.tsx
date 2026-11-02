@@ -11,16 +11,6 @@ export const userScreenView = async (c: Context) => {
     <div class="max-w-[1440px] mx-auto px-4 md:px-8 py-6 md:py-8">
       <div class="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_320px] gap-8">
         <div class="min-w-0 space-y-6">
-          {/* Capabilities — self-refreshing card (checked = capabilities the assistant can use). */}
-          <div
-            id="capabilities-prefs-card"
-            hx-get="/app/api/capabilities-prefs"
-            hx-trigger="load"
-            hx-swap="outerHTML"
-          >
-            <div class="card p-5 text-sm text-ink-400 dark:text-ink-500">Loading…</div>
-          </div>
-
           {/* Navigation — self-refreshing card (checked = shell nav sections shown). */}
           <div
             id="nav-prefs-card"

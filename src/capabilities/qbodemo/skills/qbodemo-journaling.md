@@ -1,5 +1,6 @@
 ---
 name: qbodemo-journaling
+group: qbodemo
 description: Post journal entries to the DEMO QuickBooks company (Acme Fund Services), including shared-services expense allocations across funds (classes). Activate ONLY when the user asks to create, post, allocate, or reclassify a journal entry against the demo company.
 tools: [{"name":"qbodemo_accounts_list","role":"resolve account names to Ids"},{"name":"qbodemo_classes_list","role":"resolve fund (class) names to Ids"},{"name":"qbodemo_allocation_compute","role":"deterministic split to balanced interim-table lines"},{"name":"get_data","role":"read the allocation table, expense CSV, and interim table"},{"name":"list_data","role":"list available data"},{"name":"list_rules","role":"read the workspace allocation rule"},{"name":"get_rule","role":"read the workspace allocation rule"},{"name":"qbodemo_journal_create","role":"post the journal entry"},{"name":"qbodemo_journal_entries","role":"verify the posted entry"},{"name":"show_message","role":"confirm the post and report the entry Id"}]
 ---

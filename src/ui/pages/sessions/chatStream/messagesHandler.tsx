@@ -110,6 +110,21 @@ export const messagesHandler = async (c: Context) => {
   });
   const noiseMsgs = allMsgs.filter(isNoise);
 
+  // Per-message story label — the story selected at (or before) each message, so a
+  // later turn's story does not relabel earlier messages in the session.
+  const storyTitle = (id: unknown): string | null =>
+    id ? String(id).replace(/-/g, " ").replace(/\b\w/g, (ch: string) => ch.toUpperCase()) : null;
+  let currentStory: string | null = null;
+  const storyByMsgId: Record<string, string | null> = {};
+  for (const m of session.messages as any[]) {
+    if (m?.json?.kind === "thinking" && m?.json?.stage === "story-outcome") {
+      currentStory = typeof m.json.story === "string" ? m.json.story : null;
+    }
+    storyByMsgId[m.id] = currentStory;
+  }
+  // Fallback for messages that predate any story marker (or when none was selected).
+  const fallbackStory = (session.metadata as any)?.plan?.provenance?.story as string | undefined;
+
   const stripMd = (s: string): string =>
     (s || "")
       .replace(/^\s*>\s*/gm, "")
@@ -228,7 +243,7 @@ export const messagesHandler = async (c: Context) => {
                 <svg class="w-3.5 h-3.5 text-brand-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
                 </svg>
-                Workflow
+                {storyTitle(storyByMsgId[message.id] ?? fallbackStory) ?? "Assistant"}
               </span>
             ) : (
               <span class="ds-label">{resolveLabel(message)}</span>

@@ -1,10 +1,12 @@
 /**
- * Rule — a workspace rule/policy/preference authored by the user and stored
- * in the .wfp document under the top-level `rules` node.
+ * Rule — formerly a distinct workspace-authored type. Now unified with `Skill`:
+ * a workspace rule IS a workspace-authored skill (`source: "workspace"`).
  *
- * Distinct from a `Skill` (app-level orchestration instructions shipped with
- * the code): rules are user data. The app uses a skill to create a rule.
+ * Kept as a type alias so the many existing `wfp-format/rule` imports keep
+ * compiling through the migration; new code should import `Skill` directly.
  */
+
+import type { Skill } from "./skill";
 
 /** A structured tool reference — the authoritative form of "which tool does this
  *  rule/skill use", replacing the prose `## Tools needed` backtick list. `name`
@@ -14,13 +16,5 @@ export interface ToolRef {
   role?: string;
 }
 
-export interface Rule {
-  name: string;
-  description?: string;
-  tags?: string[];
-  content: string;       // markdown body (## Instructions + ## Rules)
-  /** Structured tool references (authoritative; no longer parsed from content). */
-  tools?: ToolRef[];
-  created_at?: string;
-  updated_at?: string;
-}
+/** A workspace rule = a workspace-authored skill. */
+export type Rule = Skill;

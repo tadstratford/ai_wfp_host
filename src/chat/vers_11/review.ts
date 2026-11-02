@@ -1013,3 +1013,258 @@ export async function reconcileReviewEvidence(opts: {
   return { evidence, toolsUsed, pendingClarify };
 }
 
+// ────────────────────────────────────────────────────────────────
+// Resolution-beat report — a self-contained HTML document assembled
+// deterministically from the review payload (verdicts, variances, findings,
+// scope, relationships). Figures and names are templated verbatim — no LLM, no
+// narration. Delivered by the executor via `buildReportMessage`/`chat_download`.
+
+function escHtml(s: unknown): string {
+  return String(s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function htmlMoney(n: number): string {
+  const r = Math.round(n);
+  return `${r < 0 ? "-" : ""}$${Math.abs(r).toLocaleString("en-US")}`;
+}
+
+function htmlVerdictColor(severity: number): string {
+  if (severity >= 0.6) return "#dc2626";
+  if (severity >= 0.3) return "#d97706";
+  return "#16a34a";
+}
+
+function htmlVerdictLabel(severity: number): string {
+  if (severity >= 0.6) return "Red";
+  if (severity >= 0.3) return "Yellow";
+  return "Green";
+}
+
+export function buildReviewReportHtml(review: ReviewPayload): string {
+  const title = review.title || "Data review";
+
+  const verdictRows = (review.verdicts ?? [])
+    .map((v) => {
+      const c = htmlVerdictColor(v.severity);
+      return `<tr><td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;color:${c};font-weight:600">${escHtml(v.category)}</td>` +
+        `<td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;color:${c}">${htmlVerdictLabel(v.severity)}</td>` +
+        `<td style="padding:8px 10px;border-bottom:1px solid #e5e7eb">${escHtml(v.summary)}</td>` +
+        `<td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;color:#6b7280">${escHtml(v.basis)}</td></tr>`;
+    })
+    .join("\n");
+
+  const varianceRows = (review.variances ?? [])
+    .filter((v) => Math.abs(v.diff) > 1e-6)
+    .map(
+      (v) =>
+        `<tr><td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;font-weight:600">${escHtml(v.key)}</td>` +
+        `<td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;text-align:right">${htmlMoney(v.left)}</td>` +
+        `<td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;text-align:right">${htmlMoney(v.right)}</td>` +
+        `<td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;text-align:right;color:#dc2626;font-weight:600">${v.diff > 0 ? "+" : ""}${htmlMoney(v.diff)}</td></tr>`,
+    )
+    .join("\n");
+
+  const findings = (review.verdicts ?? []).filter((v) => v.severity >= 0.6);
+  const findingItems = findings
+    .map(
+      (v) =>
+        `<li style="margin:6px 0"><strong>${escHtml(v.category)}</strong> — ${escHtml(v.summary)}. <span style="color:#6b7280">${escHtml(v.basis)}</span></li>`,
+    )
+    .join("\n");
+
+  const scopeRows = (review.nodes ?? [])
+    .map(
+      (n) =>
+        `<tr><td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;font-weight:600">${escHtml(n.label)}</td>` +
+        `<td style="padding:8px 10px;border-bottom:1px solid #e5e7eb">${escHtml(n.role)}</td>` +
+        `<td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;text-align:right">${n.rows}</td>` +
+        `<td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;text-align:right">${n.columns}</td>` +
+        `<td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;text-align:right">${n.dupRows}</td>` +
+        `<td style="padding:8px 10px;border-bottom:1px solid #e5e7eb">${escHtml(n.nullColNames.join(", ") || "—")}</td></tr>`,
+    )
+    .join("\n");
+
+  const relField = (label: string, value: string, muted = false) =>
+    `<div style="margin-bottom:6px"><span style="color:#6b7280;font-weight:600;font-size:12px">${label}: </span>` +
+    `<span${muted ? ' style="color:#6b7280"' : ""}>${value}</span></div>`;
+
+  const edgeRows = (review.edges ?? [])
+    .map(
+      (e) =>
+        `<div style="padding:10px 12px;border-bottom:1px solid #e5e7eb">` +
+        relField("From", escHtml(e.from)) +
+        relField("To", escHtml(e.to)) +
+        relField("Status", escHtml(e.status)) +
+        relField("Key column", escHtml(e.keyCol)) +
+        relField("Detail", escHtml(e.detail), true) +
+        `</div>`,
+    )
+    .join("\n");
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>${escHtml(title)}</title>
+<style>
+:root{--brand:#534AB7;--ink:#1e1b4b;--muted:#6b7280;--line:#e5e7eb;--bg:#f8f9fc}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+.wrap{max-width:920px;margin:0 auto;padding:24px}
+.ctx{background:#fff;border:1px solid var(--line);border-left:4px solid var(--brand);border-radius:10px;padding:16px 18px;margin-bottom:20px}
+.ctx .eyebrow{margin:0 0 4px;font-size:12px;font-weight:600;color:var(--brand);text-transform:uppercase;letter-spacing:.04em}
+.ctx h1{margin:0 0 8px;font-size:20px}
+.ctx .meta{color:var(--muted);font-size:13px}
+.card{background:#fff;border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin-bottom:16px}
+.card h2{margin:0 0 12px;font-size:14px;text-transform:uppercase;letter-spacing:.03em;color:var(--muted)}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{background:#fafafe;text-align:left;padding:8px 10px;text-transform:uppercase;letter-spacing:.03em;color:var(--muted);border-bottom:1px solid var(--line);font-size:11px}
+ol{margin:0;padding-left:20px}
+footer{margin-top:18px;color:var(--muted);font-size:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="ctx">
+    <p class="eyebrow">Data review</p>
+    <h1>${escHtml(title)}</h1>
+    <div class="meta">Generated ${new Date().toLocaleString()} · deterministic (no AI narration)</div>
+  </div>
+  <div class="card">
+    <h2>Verdicts</h2>
+    <table>
+      <thead><tr><th>Category</th><th>Verdict</th><th>Summary</th><th>Basis</th></tr></thead>
+      <tbody>${verdictRows || '<tr><td colspan="4" style="padding:8px 10px">No verdicts.</td></tr>'}</tbody>
+    </table>
+  </div>
+  ${varianceRows ? `<div class="card">
+    <h2>Variances</h2>
+    <table>
+      <thead><tr><th>Key</th><th style="text-align:right">Left</th><th style="text-align:right">Right</th><th style="text-align:right">Difference</th></tr></thead>
+      <tbody>${varianceRows}</tbody>
+    </table>
+  </div>` : ""}
+  ${findingItems ? `<div class="card">
+    <h2>What needs to change or be added</h2>
+    <ol>${findingItems}</ol>
+  </div>` : ""}
+  ${scopeRows ? `<div class="card">
+    <h2>Scope</h2>
+    <table>
+      <thead><tr><th>Table</th><th>Role</th><th style="text-align:right">Rows</th><th style="text-align:right">Columns</th><th style="text-align:right">Duplicate rows</th><th>Blank columns</th></tr></thead>
+      <tbody>${scopeRows}</tbody>
+    </table>
+  </div>` : ""}
+  ${edgeRows ? `<div class="card">
+    <h2>Relationships</h2>
+    <div>${edgeRows}</div>
+  </div>` : ""}
+  <footer>Provenance: assembled deterministically from the review tool evidence. This report is read-only — re-run to regenerate from current data.</footer>
+</div>
+</body>
+</html>`;
+}
+
+// ────────────────────────────────────────────────────────────────
+// Remediation ("plan" beat) — the LLM proposes an ordered list of actions from
+// the deterministic findings, each referencing the `verdict-*`/`var-*` refs it
+// resolves. Read-only: actions are recommendations, not execution. A
+// deterministic fallback runs when the LLM is unavailable.
+
+import { llmCall } from "@backend/core/llm/llmCall";
+
+export interface StoryAction {
+  label: string;
+  refs: string[];
+}
+
+const VALID_REF_RE = /^(verdict|var|node|edge)-\d+$/;
+
+/** A plain-language digest of the findings the plan is proposed against. */
+export function findingsDigest(review: ReviewPayload): string {
+  const lines: string[] = [];
+  for (const v of review.verdicts ?? []) {
+    lines.push(`- [${v.ref}] ${v.category} (${v.severity.toFixed(2)}): ${v.summary} — ${v.basis}`);
+  }
+  for (const v of review.variances ?? []) {
+    if (Math.abs(v.diff) > 1e-6) {
+      lines.push(`- [${v.ref}] ${v.key}: left ${v.left} vs right ${v.right} (diff ${v.diff})`);
+    }
+  }
+  for (const n of review.nodes ?? []) {
+    if ((n.nullColNames?.length ?? 0) > 0) {
+      lines.push(`- [${n.ref}] ${n.label}: blank fields ${n.nullColNames.join(", ")}`);
+    }
+  }
+  return lines.join("\n");
+}
+
+/** Deterministic fallback (no LLM key): one action per non-green verdict and
+ *  per variance, mapped to the review findings. */
+export function deterministicPlan(review: ReviewPayload): StoryAction[] {
+  const actions: StoryAction[] = [];
+  for (const v of review.verdicts ?? []) {
+    if (v.severity >= 0.3) {
+      actions.push({ label: `Resolve "${v.category}" — ${v.summary}`, refs: [v.ref] });
+    }
+  }
+  for (const v of review.variances ?? []) {
+    if (Math.abs(v.diff) > 1e-6) {
+      actions.push({
+        label: `Investigate the variance for "${v.key}" (${v.diff > 0 ? "+" : ""}${v.diff})`,
+        refs: [v.ref],
+      });
+    }
+  }
+  return actions;
+}
+
+export async function buildRemediationPlan(opts: {
+  databaseId: string;
+  review: ReviewPayload;
+  rawMessage: string;
+}): Promise<{ actions: StoryAction[]; unavailable?: boolean }> {
+  const findings = findingsDigest(opts.review);
+  if (!findings) return { actions: [] };
+
+  const systemPrompt =
+    "You are proposing a remediation plan for a data-review. The findings below were " +
+    "produced deterministically (no LLM wrote them). Propose an ordered list of actions " +
+    "that resolve the findings. Respond with JSON only: {\"actions\":[{\"label\":\"...\",\"refs\":[\"verdict-1\"]}]}. " +
+    "Rules: (1) copy entity/account names VERBATIM from the findings — never invent or rename; " +
+    "(2) do not introduce any numbers not derivable from the findings; " +
+    "(3) each ref must be an existing ref listed in the findings; " +
+    "(4) each action is a concrete recommendation (investigate, reclassify, reconcile, re-import, re-run) — you are NOT executing it, only proposing it; " +
+    "(5) order actions by materiality (red/high severity first).";
+
+  try {
+    const result = await llmCall(opts.databaseId, "chat:story-plan", {
+      systemPrompt,
+      messages: [{ role: "user", content: `FINDINGS:\n${findings}` }],
+      maxTokens: 800,
+      temperature: 0,
+      responseFormat: "json",
+    });
+    const data = (result.data ?? {}) as Record<string, unknown>;
+    const raw = Array.isArray(data.actions) ? (data.actions as unknown[]) : [];
+    const actions: StoryAction[] = raw
+      .filter((a): a is Record<string, unknown> => !!a && typeof a === "object")
+      .map((a) => ({
+        label: typeof a.label === "string" ? a.label : "",
+        refs: Array.isArray(a.refs)
+          ? (a.refs as unknown[]).filter((r): r is string => typeof r === "string" && VALID_REF_RE.test(r))
+          : [],
+      }))
+      .filter((a) => a.label.trim().length > 0);
+    if (actions.length === 0) return { actions: deterministicPlan(opts.review) };
+    return { actions };
+  } catch (err: any) {
+    console.warn(`[vers_11] remediation plan failed (falling back to deterministic): ${err.message}`);
+    return { actions: deterministicPlan(opts.review), unavailable: true };
+  }
+}
+

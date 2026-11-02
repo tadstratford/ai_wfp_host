@@ -239,3 +239,30 @@ placed **before** the write-approval gate — a flagged rule blocks the write.
 - [ ] **Prompt narrowing** — inject the *selected* rule subset (not all workspace
       rules) into `buildSystemPrompt` for large rule sets.
 
+## 10. Rule = Skill unification
+
+Status: **done** (data layer) — catalog merge + consumer naming open.
+
+Workspace "rules" and app "skills" are one type. `Rule` is a `Skill` with
+`source: "workspace"`; the `.wfp` `rules[]` node migrates to `skills[]`.
+
+- [x] `Skill.source: "app" | "workspace"` (`src/types/skill.ts`); `Rule = Skill`
+      alias + `ToolRef` kept (`src/types/rule.ts`).
+- [x] `.wfp` `skills[]` (new) + `rules[]` (deprecated alias); `normalizeWfp`
+      migrates `rules[] → skills[]` (stamping `source: "workspace"`) and drops
+      `rules` (`src/workspace/WorkspaceSession.ts`). Accessor aliases kept:
+      `getRules` / `getRule` / `upsertRule` / `deleteRule`.
+- [x] Rules store/loader/validate operate on `skills[]` (read `skills ?? rules`;
+      write `skills` only) — `src/rules/store.ts`.
+- [x] Persistence — `WorkspaceSession` accessors delegate to the store;
+      `workspaceStore.ts` writes `skills`; `reconstruct.ts` reconstructs `skills`.
+- [ ] Catalog merge — `getCatalogForWorkspace` still returns workspace rules in a
+      separate `rules` field rather than merged into `skills` (`source:
+      "workspace"`); `materializeCatalog` correctly excludes workspace skills.
+- [ ] Consumer naming — the `rules` capability (`list_rules` / `create_rule` /
+      `get_rule` / `update_rule` / `delete_rule` / `select_rule`), the wfp-api
+      (`getRule` / `listRules`), and chat consumers (v8/v11/context manifest)
+      still use "rules" terminology.
+- [x] Docs — `docs/system-of-record/wfp-nodes.md` (`skills[]`, formerly
+      `rules[]`); typecheck clean; 339 tests / 0 fail.
+

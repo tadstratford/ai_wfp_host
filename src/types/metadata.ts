@@ -15,4 +15,7 @@ export interface Metadata {
   engagement_id?: string;
   /** Identity-shell reference — the team responsible for this file. */
   team_id?: string;
+  /** Enabled skill-group ids (capabilities) for this workspace — the canonical
+   *  per-workspace enablement preference, referenced by stable group id. */
+  enabled_skill_groups?: string[];
 }

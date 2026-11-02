@@ -1,5 +1,6 @@
 ---
 name: email-outbound
+group: email-outbound
 description: Send outbound email via Resend, subject to the workspace outbound allowlist.
 scope: chat
 tools: [{"name":"send_email","role":"send an outbound email (allowlist-enforced)"},{"name":"show_message","role":"present the message for confirmation"}]

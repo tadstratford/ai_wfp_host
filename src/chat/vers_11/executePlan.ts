@@ -23,9 +23,10 @@ import type { PlanRequest } from "./plan/planner";
 import { COMPOSABLE_PRIMITIVES } from "./plan/primitives";
 import { withTimeout } from "./util";
 import type { OrchestratorIO } from "./types";
-import { buildReview, renderReviewReport, reconcileReviewEvidence } from "./review";
+import { buildReview, renderReviewReport, reconcileReviewEvidence, buildReviewReportHtml, buildRemediationPlan } from "./review";
 import { loadConfig } from "./config";
 import { verifyResultLlm, shouldVerify, verdictPasses } from "./verify";
+import { buildReportMessage } from "@core/tools/reportRenderer";
 import type { DataStep, EvidenceItem, RuleTier, TurnPlan } from "./types";
 
 const VERIFIABLE_TOOLS = new Set([
@@ -317,12 +318,6 @@ export async function executePlan(opts: {
       // data step
       step.status = "running";
       const dataIndex = plan.steps.slice(0, plan.cursor).filter((s) => s.kind === "data").length;
-      if (io.verbose) {
-        await io.addMessage({
-          markdown: `▶ ${step.label}`,
-          json: { kind: "thinking", stage: "step-start", index: dataIndex, label: step.label },
-        });
-      }
       await io.addMessage({
         markdown: step.label,
         json: { kind: "step-status", index: dataIndex, status: "running", label: step.label },
@@ -405,6 +400,44 @@ export async function executePlan(opts: {
         markdown: built.receipts,
         json: { kind: "review", review: built.payload, skills: plan.provenance.skills },
       });
+
+      // Resolution beat — when a report was requested, render the FULL review
+      // (verdicts + variances + findings + scope), not a single-table drill-down,
+      // as a self-contained HTML report and deliver it the way `chat_download` does.
+      if (plan.provenance.report) {
+        const reportHtml = buildReviewReportHtml(built.payload);
+        const messageId = Date.now().toString();
+        const { html: cardHtml, json: reportJson } = buildReportMessage(
+          reportHtml,
+          "review-report.html",
+          io.sessionId,
+          undefined,
+          messageId,
+        );
+        await io.addMessage({
+          id: messageId,
+          html: cardHtml,
+          json: { reportHtml, messageId, contentType: reportJson.contentType },
+        });
+      }
+
+      // Plan beat — propose an ordered remediation plan from the findings
+      // (LLM-composed with a deterministic fallback; read-only recommendations).
+      if (plan.provenance.story === "audit-review") {
+        const remediation = await buildRemediationPlan({
+          databaseId: io.databaseId,
+          review: built.payload,
+          rawMessage: opts.rawMessage,
+        });
+        if (remediation.actions.length > 0) {
+          await io.addMessage({
+            markdown:
+              "**Remediation plan**\n" +
+              remediation.actions.map((a, i) => `${i + 1}. ${a.label}`).join("\n"),
+            json: { kind: "story", bucket: "plan", actions: remediation.actions, skills: plan.provenance.skills },
+          });
+        }
+      }
     } else {
       const fallback = renderReviewReport(reviewEvidence, relationshipsOutput, opts.rawMessage);
       replyMarkdown = fallback;

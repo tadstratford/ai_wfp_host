@@ -1,32 +1,46 @@
 /**
- * Rules Store — CRUD for user rules on WorkspaceSession.
+ * Rules Store — CRUD for workspace-authored skills on WorkspaceSession.
  *
- * User rules are stored in wfp.rules[] on the workspace document.
+ * Workspace-authored skills (formerly "rules") are stored in `wfp.skills[]` on
+ * the workspace document. Legacy `wfp.rules[]` is read on the way in and
+ * migrated to `skills[]` by the session's `normalizeWfp`; the store only writes
+ * `skills[]`.
  */
 
+import type { Skill } from "wfp-format/skill";
 import type { Rule } from "wfp-format/rule";
 
-export function getRules<T extends { rules?: Rule[] }>(wfp: T): Rule[] {
-  return structuredClone(wfp.rules ?? []);
+type WithSkills = { skills?: Skill[]; rules?: Rule[] };
+
+function readSkills(wfp: WithSkills): Skill[] {
+  return (wfp.skills ?? wfp.rules ?? []).map((s) => ({
+    ...s,
+    source: s.source ?? "workspace",
+  }));
 }
 
-export function getRule<T extends { rules?: Rule[] }>(
+export function getRules<T extends WithSkills>(wfp: T): Skill[] {
+  return structuredClone(readSkills(wfp));
+}
+
+export function getRule<T extends WithSkills>(
   wfp: T,
   name: string,
-): Rule | null {
-  const found = wfp.rules?.find((s) => s.name === name);
+): Skill | null {
+  const found = readSkills(wfp).find((s) => s.name === name);
   return found ? structuredClone(found) : null;
 }
 
-export function upsertRule<T extends { rules?: Rule[] }>(
+export function upsertRule<T extends WithSkills>(
   wfp: T,
-  rule: Rule,
+  rule: Skill,
 ): void {
-  if (!wfp.rules) wfp.rules = [];
+  if (!wfp.skills) wfp.skills = readSkills(wfp);
 
-  const idx = wfp.rules.findIndex((s) => s.name === rule.name);
-  const entry: Rule = {
+  const idx = wfp.skills.findIndex((s) => s.name === rule.name);
+  const entry: Skill = {
     ...structuredClone(rule),
+    source: rule.source ?? "workspace",
     updated_at: new Date().toISOString(),
   };
 
@@ -35,19 +49,18 @@ export function upsertRule<T extends { rules?: Rule[] }>(
   }
 
   if (idx >= 0) {
-    wfp.rules[idx] = entry;
+    wfp.skills[idx] = entry;
   } else {
-    wfp.rules.push(entry);
+    wfp.skills.push(entry);
   }
 }
 
-export function deleteRule<T extends { rules?: Rule[] }>(
+export function deleteRule<T extends WithSkills>(
   wfp: T,
   name: string,
 ): boolean {
-  if (!wfp.rules) return false;
-  const idx = wfp.rules.findIndex((s) => s.name === name);
-  if (idx < 0) return false;
-  wfp.rules.splice(idx, 1);
-  return true;
+  const list = readSkills(wfp);
+  if (list.length === 0) return false;
+  wfp.skills = list.filter((s) => s.name !== name);
+  return wfp.skills.length < list.length;
 }

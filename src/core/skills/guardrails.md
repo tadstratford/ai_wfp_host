@@ -1,5 +1,6 @@
 ---
 name: guardrails
+group: core
 description: Safety policy — always confirm with the user before any action that creates, posts, modifies, deletes, or sends data.
 ---
 

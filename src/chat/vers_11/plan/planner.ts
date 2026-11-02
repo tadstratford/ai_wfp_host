@@ -59,6 +59,10 @@ export interface PlanRequest {
   /** The selected workspace rules' full markdown (instructions + tools + rules),
    *  injected so the planner can follow a client's method exactly. */
   guidance?: string;
+  /** The selected story (meta-plan) archetype id, e.g. "audit-review". When
+   *  present, the planner derives the plan from the story's beats instead of
+   *  re-classifying the request shape. */
+  story?: string;
 }
 
 /** Calibrated confidence from a plan's internal validation (for future
@@ -78,6 +82,10 @@ export type PlanResult =
       plan: NodePlan;
       missingRequired: string[];
       confidence?: PlanConfidence;
+      /** True when the request asks for a report/downloadable file as the
+       *  outcome — the executor's resolution beat reads this to render the
+       *  review as a self-contained HTML report. */
+      report?: boolean;
     }
   | {
       kind: "fallback";

@@ -42,6 +42,9 @@ export interface Vers11Config {
   /** Routing thresholds. */
   routing: { skillProbThreshold: number; maxSkills: number };
 
+  /** Story (meta-plan) archetype-selection thresholds. */
+  story: { archetypeProbThreshold: number; maxArchetypes: number };
+
   /** Rule-selection funnel thresholds. */
   rules: {
     tagThreshold: number;
@@ -115,6 +118,10 @@ export function loadConfig(): Vers11Config {
     routing: {
       skillProbThreshold: num("SKILL_PROB_THRESHOLD", 0.15),
       maxSkills: Math.max(1, int("MAX_SKILLS", 3)),
+    },
+    story: {
+      archetypeProbThreshold: num("ARCHETYPE_PROB_THRESHOLD", 0.15),
+      maxArchetypes: Math.max(1, int("MAX_ARCHETYPES", 1)),
     },
     rules: {
       tagThreshold: num("RULE_TAG_THRESHOLD", 0.3),

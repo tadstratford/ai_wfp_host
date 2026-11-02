@@ -660,6 +660,43 @@ async function buildMultiSourcePlan(
   return { kind: "plan", plan: { steps }, missingRequired: [] };
 }
 
+/** quick-fact story → a minimal read plan (list/get the referenced data), no
+ *  aggregation, check, or report. The inline answer is the executor's epilogue. */
+async function quickFactPlan(
+  req: PlanRequest,
+  ctx: ShapeContext,
+): Promise<PlanResult> {
+  const inventory = dataInventory(req.databaseId);
+  const nameMatches = resolveDataNames(
+    req.rawMessage,
+    inventory.filter((d) => !d.name.startsWith("staging_")).map((d) => ({ name: d.name })),
+  );
+  const sources = Array.from(new Set([...ctx.dataFiles, ...nameMatches]));
+
+  const steps: PlanStep[] = [];
+  if (sources.length > 0) {
+    steps.push({
+      tool_id: "get_data",
+      tool_parameters: { names: sources },
+      label: `Read ${sources.length} table${sources.length === 1 ? "" : "s"}`,
+      beat: "setup",
+    });
+  } else {
+    steps.push({ tool_id: "list_data", tool_parameters: {}, label: "List data", beat: "setup" });
+  }
+
+  const missingRequired: string[] = [];
+  for (const s of steps) {
+    for (const m of await stepMissing(s.tool_id, s.tool_parameters)) {
+      missingRequired.push(`${s.tool_id}.${m}`);
+    }
+  }
+  if (missingRequired.length > 0) {
+    return { kind: "fallback", reason: `missing required: ${missingRequired.join(", ")}` };
+  }
+  return { kind: "plan", plan: { steps }, missingRequired: [] };
+}
+
 /** Analysis over loaded workspace data → aggregate/judge → report → download. */
 async function analysisPlan(
   req: PlanRequest,
@@ -964,6 +1001,7 @@ async function dataReviewPlan(
     tool_id: "get_data",
     tool_parameters: { names: target.map((t) => t.name) },
     label: `Read ${target.length} tables`,
+    beat: "setup",
   });
 
   // 2) Profile each table — completeness / duplicates / type violations, plus
@@ -972,28 +1010,32 @@ async function dataReviewPlan(
     const tp: Record<string, unknown> = { name: t.name };
     const footings = detectFootings(t.columns);
     if (footings.length > 0) tp.footings = footings;
-    steps.push({ tool_id: "profile_data", tool_parameters: tp, label: `Profile ${t.name}` });
+    steps.push({ tool_id: "profile_data", tool_parameters: tp, label: `Profile ${t.name}`, beat: "setup" });
   }
 
-  // 3) Broad Jev checks over the largest table (the ledger/transaction table).
+  // 3) Discover cross-table links (drives any reconciliation).
+  steps.push({ tool_id: "list_relationships", tool_parameters: {}, label: "Discover relationships", beat: "setup" });
+
+  // 4) Broad Jev checks over the largest table (the ledger/transaction table).
   const largest = target[0];
   steps.push({
     tool_id: "check_data",
     tool_parameters: { name: largest.name, checks: REVIEW_CHECKS },
     label: `Check ${largest.name}`,
+    beat: "status",
   });
 
-  // 4) Discover cross-table links (drives any reconciliation).
-  steps.push({ tool_id: "list_relationships", tool_parameters: {}, label: "Discover relationships" });
-
-  // 5) Footing: grand-total aggregate per table with a numeric column.
+  // 5) Footing: grand-total aggregate per table with a numeric column. These
+  //    aggregates are the evidence the post-battery reconciliation phase (and
+  //    the report it renders) consume. The report itself is assembled AFTER
+  //    execution, in the resolution beat, from the review payload — not here.
   for (const t of target) {
     const measure = pickMeasureCol(t);
     if (!measure) continue;
     const group = pickGroupCol(t);
     const tp: Record<string, unknown> = { name: t.name, measures: [{ column: measure, fn: "sum" }] };
     if (group && group !== measure) tp.group_by = [group];
-    steps.push({ tool_id: "aggregate_data", tool_parameters: tp, label: `Total ${t.name}` });
+    steps.push({ tool_id: "aggregate_data", tool_parameters: tp, label: `Total ${t.name}`, beat: "status" });
   }
 
   // Fail closed: any unresolved required arg → defer to the LLM build loop.
@@ -1007,7 +1049,7 @@ async function dataReviewPlan(
     return { kind: "fallback", reason: `missing required: ${missingRequired.join(", ")}` };
   }
 
-  return { kind: "plan", plan: { steps }, missingRequired: [] };
+  return { kind: "plan", plan: { steps }, report: flags.report, missingRequired: [] };
 }
 
 // ── Shape registry ──────────────────────────────────────────────────────────
@@ -1068,7 +1110,7 @@ const SHAPES: ShapeDef[] = [
     priority: 50,
     nouls: {
       review:
-        "Does this request ask to review, audit, analyze, explore, reconcile, check, foot, or tie-out the loaded data the way an accountant would — broadly surfacing findings across completeness, existence/orphans, footing, valuation/agreement across sources, classification/allocation, cutoff/timing, consistency, and no-guessing — rather than a specific aggregation, a specific yes/no check, or a report?",
+        "Does this request ask to review, audit, analyze, explore, reconcile, check, foot, or tie-out the loaded data the way an accountant would — broadly surfacing findings across completeness, existence/orphans, footing, valuation/agreement across sources, classification/allocation, cutoff/timing, consistency, and no-guessing — even if it also asks to report those findings?",
     },
     matches: (f) => f.review,
     build: (req, flags, ctx) => dataReviewPlan(req, flags, ctx),
@@ -1190,6 +1232,19 @@ export const cascadePlanner: Planner = {
     const stmt = qboStatementType(req.rawMessage);
     if (stmt) {
       return await qboStatementPlan(req, stmt);
+    }
+
+    // Story-driven dispatch — when the orchestrator selected a story, derive the
+    // plan from it instead of re-classifying the request shape. `generic` (and
+    // absent/unknown stories) fall through to the SHAPES dispatch below.
+    if (req.story === "audit-review") {
+      return await dataReviewPlan(req, flags, ctx);
+    }
+    if (req.story === "report") {
+      return await analysisPlan(req, { ...flags, report: true, explore: false }, ctx);
+    }
+    if (req.story === "quick-fact") {
+      return await quickFactPlan(req, ctx);
     }
 
     for (const shape of SHAPES) {

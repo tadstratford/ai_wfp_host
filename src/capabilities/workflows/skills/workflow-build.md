@@ -1,5 +1,6 @@
 ---
 name: workflow-build
+group: workflow-building
 description: Detect a request to create or modify an automated workflow and direct the user to the Make Workflow / Modify Workflow tools (do not build in chat).
 tools: [{"name":"show_message","role":"present the link to the user"},{"name":"list_workflows","role":"identify the workflow"},{"name":"get_workflow","role":"identify the workflow"},{"name":"list_data","role":"confirm workspace state"}]
 ---

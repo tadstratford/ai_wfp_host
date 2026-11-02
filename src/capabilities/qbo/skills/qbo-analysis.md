@@ -1,5 +1,6 @@
 ---
 name: qbo-analysis
+group: qbo
 description: Analyze QuickBooks Online data — check connection, review chart of accounts, and run targeted accounting analyses.
 tools: [{"name":"qbo_accounts_list","role":"account discovery"},{"name":"qbo_items_list","role":"products & services lookup"},{"name":"qbo_classes_list","role":"class lookup"},{"name":"report_qbo_pnl","role":"Profit & Loss HTML report"},{"name":"report_qbo_bs","role":"Balance Sheet HTML report"},{"name":"qbo_pnl_report","role":"P&L raw rows for inline markdown"},{"name":"qbo_balance_sheet","role":"Balance Sheet raw rows for inline markdown"},{"name":"qbo_gl_review","role":"GL misclassification review"},{"name":"qbo_ar_ap","role":"receivables/payables aging"},{"name":"qbo_duplicates","role":"duplicate detection"},{"name":"qbo_recurring_check","role":"recurring expense gaps"},{"name":"qbo_uncategorized","role":"uncategorized entries"},{"name":"chat_download","role":"deliver the finished report file"},{"name":"set_param","role":"store typed results"},{"name":"get_param","role":"retrieve typed results"},{"name":"show_message","role":"present findings"}]
 ---

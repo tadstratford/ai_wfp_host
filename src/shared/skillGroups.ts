@@ -1,17 +1,18 @@
-// skillGroups — the single source of truth for skill enablement.
+// skillGroups — the canonical set of skill-group ids (capabilities).
 //
-// One array of groups. Each group maps to concrete app skills and declares
-// whether it is always-on (core orchestrator skills) or a user-toggled
-// capability. A user's enabled set (admin_users.skills_enabled) stores group
-// keys; the skill loader derives the visible skills from the enabled groups
-// plus the always-on core. Tools follow skills via each skill's
-// "## Tools needed", so enabling a group enables both its skills and tools.
+// One list of groups. Each group has a stable `key` (its id) — skills declare
+// their group via frontmatter `group:` and a user's enabled set references the
+// same keys, so renaming a group's label never breaks a preference. Enablement
+// is by group: only skills whose group is always-on or user-enabled participate
+// in routing, and tools follow those skills.
+//
+// NOTE: this module no longer lists group → skills. That mapping is the skill
+// frontmatter's job (single source of truth); `loadAppSkills` derives it.
 
 export interface SkillGroupDef {
   key: string;
   label: string;
   description: string;
-  skills: string[];
   /** Always available; not shown as a user toggle. */
   alwaysOn?: boolean;
   /** Enabled by default for new users with no stored preference. */
@@ -24,13 +25,6 @@ export const SKILL_GROUPS: SkillGroupDef[] = [
     label: "Core",
     description:
       "Core assistant skills for planning, building, data handling, reporting, and safety.",
-    skills: [
-      "build",
-      "data-handling",
-      "guardrails",
-      "data-account-check",
-      "report-authoring",
-    ],
     alwaysOn: true,
   },
   {
@@ -38,35 +32,30 @@ export const SKILL_GROUPS: SkillGroupDef[] = [
     label: "Workflow & tools",
     description:
       "Detect workflow/tool-building requests and direct to Make Workflow / Modify Workflow.",
-    skills: ["workflow-build"],
     alwaysOn: true,
   },
   {
     key: "qbo",
     label: "QBO",
     description: "Live QuickBooks Online report analysis, audit, and journaling.",
-    skills: ["qbo-analysis", "qbo-audit", "qbo-journaling"],
   },
   {
     key: "qbodemo",
     label: "QBO Demo",
     description:
       "Demo-only QuickBooks company (Acme Fund Services) for budget-vs-actual and fund-allocation walkthroughs.",
-    skills: ["qbodemo-budgeting", "qbodemo-journaling"],
   },
   {
     key: "email-outbound",
     label: "Email Outbound",
     description:
       "Send outbound email, subject to the workspace outbound allowlist.",
-    skills: ["email-outbound"],
   },
   {
     key: "budgeting",
     label: "Budgeting",
     description:
       "Budget-vs-actual planning, variance reporting, and cash forecasts.",
-    skills: ["budgeting"],
   },
 ];
 
@@ -82,20 +71,10 @@ export const DEFAULT_SKILL_GROUP_KEYS = SKILL_GROUPS.filter(
   (g) => g.defaultEnabled && !g.alwaysOn,
 ).map((g) => g.key);
 
-/** Always-available (core) skill names. */
-export const CORE_SKILLS: ReadonlySet<string> = new Set(
-  SKILL_GROUPS.filter((g) => g.alwaysOn).flatMap((g) => g.skills),
-);
-
-/** Flatten a group-key list to the concrete skill names those groups enable. */
-export function skillNamesForGroups(groupKeys: string[]): string[] {
-  const set = new Set(groupKeys);
-  const names: string[] = [];
-  for (const g of SKILL_GROUPS) {
-    if (set.has(g.key)) names.push(...g.skills);
-  }
-  return names;
-}
+/** Always-on group keys (core + workflow-building). */
+export const ALWAYS_ON_GROUP_KEYS = SKILL_GROUPS.filter(
+  (g) => g.alwaysOn,
+).map((g) => g.key);
 
 /** Keep only known group keys, in canonical order, ensuring no duplicates. */
 export function normalizeGroupKeys(input: unknown): string[] {

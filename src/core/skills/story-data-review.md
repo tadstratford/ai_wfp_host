@@ -1,5 +1,6 @@
 ---
 name: story-data-review
+group: core
 description: Present a data review as a narrative the user can follow — a fixed set of beats (persona, setup, status, gap, plan, execute, resolution) delivered as their own messages with a live checklist.
 scope: chat
 tags: [review, presentation, communication]

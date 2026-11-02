@@ -7,7 +7,7 @@ const manifest: CapabilityManifest = {
   key: "rules",
   name: "Workspace Rules",
   version: "1.0.0",
-  description: "Workspace rules CRUD over wfp.rules[].",
+  description: "Workspace-authored skills CRUD (stored under wfp.skills[], formerly wfp.rules[]).",
   trust: "core",
   kind: "builtin",
 };

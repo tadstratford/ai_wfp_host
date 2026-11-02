@@ -1,5 +1,6 @@
 ---
 name: report-authoring
+group: core
 description: Author self-contained HTML reports with drill-down tables, brand styling, provenance, and CSV download. Use when the user asks for a report, dashboard, or a downloadable file.
 scope: chat+workflow
 tags: [report, html, delivery, dashboard]

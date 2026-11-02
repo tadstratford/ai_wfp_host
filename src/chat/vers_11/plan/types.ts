@@ -14,6 +14,8 @@ export interface PlanStep {
   tool_parameters: Record<string, unknown>;
   /** Human-readable label for progress/audit output. */
   label: string;
+  /** The story beat this step belongs to (drives the story-progress checklist). */
+  beat?: string;
 }
 
 export interface NodePlan {

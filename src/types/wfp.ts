@@ -10,6 +10,7 @@ import type { TodoEntry } from "./todo";
 import type { SavedPrompt } from "./prompt";
 import type { EncryptionEnvelope } from "./encryption";
 import type { Rule } from "./rule";
+import type { Skill } from "./skill";
 import type { LLMLogEntry } from "./logs";
 import type { ProvenanceEvent } from "./provenance";
 import type { PrivacyMask } from "./privacy";
@@ -23,6 +24,9 @@ export interface WfpFile {
   /** Load-time schema + relationship/lineage index (deterministic + Jev). */
   data_catalog?: DataCatalog;
   knowledge?: KnowledgePack[];
+  /** Workspace-authored skills — the unified home for what was `rules[]`. */
+  skills?: Skill[];
+  /** @deprecated legacy alias for `skills[]`; migrated to `skills[]` on open. */
   rules?: Rule[];
   sessions?: Session[];
   plan?: PlanEntry[];

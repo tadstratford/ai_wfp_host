@@ -1,5 +1,6 @@
 ---
 name: data-account-check
+group: core
 description: Review loaded workspace data the way an accountant would — run the full review battery (completeness, existence, footing, valuation agreement, classification, cutoff, consistency, no-guessing) and report a red/yellow/green verdict per category. Use for any analyze, review, audit, check, foot, reconcile, or tie-out request over the data.
 scope: chat
 tags: [audit, data, account, review, reconcile]
