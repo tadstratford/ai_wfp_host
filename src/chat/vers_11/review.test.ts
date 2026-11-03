@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { buildReviewReportHtml, findingsDigest, deterministicPlan } from "./review";
+import { buildReviewReportHtml, buildReviewWorkbookSheets, buildInstructionsSheet, shortSheetName, findingsDigest, deterministicPlan } from "./review";
 import type { ReviewPayload } from "./review";
 
 function payload(overrides: Partial<ReviewPayload> = {}): ReviewPayload {
@@ -78,6 +78,54 @@ describe("findingsDigest", () => {
     expect(digest).toContain("[var-0] Summit Bright LLC: left 52560 vs right 44700 (diff 7860)");
     expect(digest).toContain("[node-0] audit report ic transactions: blank fields Allocation Rule ID (4), Reviewed By (6)");
     expect(digest).toContain("[verdict-1]"); // green verdicts are listed too (context for the LLM)
+  });
+});
+
+describe("shortSheetName", () => {
+  it("shortens long interco basis-table labels", () => {
+    expect(shortSheetName("allocation basis tables headcount by entity july 2026")).toBe("headcount july 2026");
+    expect(shortSheetName("allocation basis tables trailing quarter revenue by entity q2 2026")).toBe("trailing quarter revenue q2 2026");
+    expect(shortSheetName("net intercompany position by entity pair")).toBe("Net position by entity pair");
+    expect(shortSheetName("exceptions items requiring bookkeeper action")).toBe("Exceptions");
+    expect(shortSheetName("ic transactions")).toBe("IC transactions");
+  });
+
+  it("passes through labels with no shared prefix", () => {
+    expect(shortSheetName("elimination check")).toBe("elimination check");
+    expect(shortSheetName("allocation rules")).toBe("allocation rules");
+  });
+});
+
+describe("buildInstructionsSheet", () => {
+  it("is a two-column lead sheet named Instructions", () => {
+    const sheet = buildInstructionsSheet();
+    expect(sheet.name).toBe("Instructions");
+    expect(sheet.columns).toEqual(["Section", "Detail"]);
+    expect(sheet.rows.length).toBeGreaterThan(0);
+    expect(sheet.rows[0]).toHaveProperty("Section", "What is this?");
+    expect(JSON.stringify(sheet.rows)).toContain("Deterministic");
+  });
+});
+
+describe("buildReviewWorkbookSheets", () => {
+  const resolveRows = (name: string) =>
+    name === "audit_report_ic_transactions" ? [{ Date: "2026-01-01", Amount: 10 }] : null;
+
+  it("uses friendly labels as sheet names and adds Verdicts/Variances sheets", () => {
+    const sheets = buildReviewWorkbookSheets(payload(), resolveRows);
+    const names = sheets.map((s) => s.name);
+    expect(names).toContain("audit report ic transactions"); // friendly label, not the raw id
+    expect(names).toContain("Verdicts");
+    expect(names).toContain("Variances");
+    expect(names).not.toContain("audit_report_ic_transactions");
+
+    const verdicts = sheets.find((s) => s.name === "Verdicts")!;
+    expect(verdicts.rows[0]).toMatchObject({ Category: "Completeness", Verdict: "Red" });
+  });
+
+  it("skips tables that resolve to no rows", () => {
+    const sheets = buildReviewWorkbookSheets(payload(), () => null);
+    expect(sheets.map((s) => s.name)).toEqual(["Verdicts", "Variances"]);
   });
 });
 

@@ -9,6 +9,7 @@ import { InlineReview } from "./InlineReview";
 import { InlinePlan } from "./InlinePlan";
 import { InlineResolution } from "./InlineResolution";
 import { Thinking } from "./Thinking";
+import { InlineWorkbook } from "./InlineWorkbook";
 
 /**
  * Get messages for a session
@@ -275,6 +276,13 @@ export const messagesHandler = async (c: Context) => {
           ) : kind === "review" && message.json?.review ? (
             /* Visual data-review card (relationship map + variance + verdicts) */
             <InlineReview review={message.json.review} receiptsHtml={message.html || message.markdown} sessionId={sessionId} />
+          ) : kind === "workbook" && Array.isArray(message.json?.preview?.sheets) ? (
+            /* Inline Excel workbook preview — tabs (sheets) + read-only grid */
+            <InlineWorkbook
+              sheets={message.json.preview.sheets}
+              messageId={message.id}
+              downloadHtml={message.html || ""}
+            />
           ) : kind === "story" && message.json?.bucket === "plan" ? (
             /* Story beat 5 — remediation plan (ordered, clickable actions) */
             <InlinePlan actions={message.json.actions ?? []} sessionId={sessionId} />

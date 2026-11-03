@@ -65,11 +65,12 @@ const ROUTING_TOOLS = ["select_skill", "list_skills"];
 // vers_8 — plumbing + data primitives + rules + reports + planning).
 const ALWAYS_AVAILABLE = [
   "show_message", "chat_download", "set_param", "get_param", "save_data",
+  "export_workbook", "view_workbook", "build_workbook",
   "list_data", "get_data", "aggregate_data", "resolve_data_shape", "judge_data",
   "compare_data", "check_data",
   "reconcile_relationship", "list_relationships",
   "profile_data", "classify_data", "split_data",
-  "report_table", "report_qbo_pnl", "report_qbo_bs",
+  "report_table", "report_qbo_pnl", "report_qbo_bs", "export_qbo_pnl", "export_qbo_bs",
   "list_skills", "get_skill", "create_skill", "update_skill", "delete_skill",
   "run_workflow",
 ];

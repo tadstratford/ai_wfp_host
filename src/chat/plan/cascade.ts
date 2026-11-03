@@ -266,6 +266,12 @@ function wantsSaveToData(raw: string): boolean {
   return /\bsave\b/.test(t) && /\b(data|workspace|persist|store)\b/.test(t);
 }
 
+/** True when the request asks to deliver the statement as an Excel workbook. */
+function wantsExcel(raw: string): boolean {
+  const t = raw.toLowerCase();
+  return /\b(excel|workbook|xlsx|\.xls\b|spreadsheet)\b/.test(t);
+}
+
 /** Map a QBO targeted-read request to its read tool id (deterministic). */
 function qboReadTool(raw: string): string | null {
   const t = raw.toLowerCase();
@@ -345,7 +351,9 @@ function cashFeedTool(databaseId: string): string | null {
   return null;
 }
 
-/** QBO statement → report_qbo_pnl / report_qbo_bs → chat_download. */
+/** QBO statement → report_qbo_pnl / report_qbo_bs → chat_download. When the
+ *  request asks for an Excel workbook, uses export_qbo_pnl / export_qbo_bs
+ *  instead (they deliver the formatted .xlsx directly — no chat_download). */
 async function qboStatementPlan(
   req: PlanRequest,
   stmt: "pnl" | "balance_sheet",
@@ -374,6 +382,21 @@ async function qboStatementPlan(
   if (typeof values.accounting_method === "string") {
     tp.accounting_method = values.accounting_method;
   }
+
+  // "put it into an excel workbook" → the deterministic exporters deliver the
+  // formatted .xlsx directly (single step, no chat_download).
+  if (wantsExcel(req.rawMessage)) {
+    const exportTool = stmt === "pnl" ? "export_qbo_pnl" : "export_qbo_bs";
+    const steps: PlanStep[] = [
+      {
+        tool_id: exportTool,
+        tool_parameters: tp,
+        label: stmt === "pnl" ? "Export QBO P&L to Excel" : "Export QBO Balance Sheet to Excel",
+      },
+    ];
+    return { kind: "plan", plan: { steps }, missingRequired: [] };
+  }
+
   // "save it to data" → persist the structured statement rows alongside the HTML.
   if (wantsSaveToData(req.rawMessage)) {
     const year = start_date.slice(0, 4);

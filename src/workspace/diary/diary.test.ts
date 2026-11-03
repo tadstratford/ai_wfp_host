@@ -11,13 +11,23 @@ function makeSession(): WorkspaceSession {
 }
 
 describe("diary", () => {
-  test("60 entries roll into one summary", () => {
+  test("5 entries roll into one summary", () => {
     const s = makeSession();
-    for (let i = 0; i < 60; i++) s.recordDiaryEntry({ summary: `entry ${i}` });
+    for (let i = 0; i < 5; i++) s.recordDiaryEntry({ summary: `entry ${i}` });
     const diary = s.getDiary();
     expect(diary.entries.length).toBe(0);
     expect(diary.summaries.length).toBe(1);
-    expect(diary.summaries[0].count).toBe(60);
+    expect(diary.summaries[0].count).toBe(5);
+  });
+
+  test("25 entries roll into one narrative chunk (5 summaries x 5)", () => {
+    const s = makeSession();
+    for (let i = 0; i < 25; i++) s.recordDiaryEntry({ summary: `entry ${i}` });
+    const diary = s.getDiary();
+    expect(diary.entries.length).toBe(0);
+    expect(diary.summaries.length).toBe(0);
+    expect(diary.narrative.length).toBe(1);
+    expect(diary.narrative[0].count).toBe(5);
   });
 
   test("data load (new entry) records a diary entry with stats", () => {

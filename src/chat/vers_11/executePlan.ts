@@ -16,6 +16,9 @@
 import { aggregator } from "../../mcp/aggregator";
 import { resolveTemplates, setParameterValue } from "@backend/core/settings/parameterHelpers";
 import { getSession, updateSession } from "@backend/core/session/sessions/session_all";
+import { getSessionByDatabaseId } from "@backend/core/workspace/workspaceSessionStore";
+import { extractTable } from "@data/table";
+import { buildWorkbook, rowsToGrid } from "@shared/wfp-api/xlsx";
 import { getCapabilityIndex } from "@mcp/capabilityIndex";
 import { isPresentableTool, isMutatingTool } from "../../capabilities/registry";
 import { getPlanner } from "./plan/planner";
@@ -23,11 +26,21 @@ import type { PlanRequest } from "./plan/planner";
 import { COMPOSABLE_PRIMITIVES } from "./plan/primitives";
 import { withTimeout } from "./util";
 import type { OrchestratorIO } from "./types";
-import { buildReview, renderReviewReport, reconcileReviewEvidence, buildReviewReportHtml, buildRemediationPlan } from "./review";
+import { buildReview, renderReviewReport, reconcileReviewEvidence, buildReviewReportHtml, buildReviewWorkbookSheets, buildInstructionsSheet, nameWorkbookSheets, buildRemediationPlan } from "./review";
 import { loadConfig } from "./config";
 import { verifyResultLlm, shouldVerify, verdictPasses } from "./verify";
-import { buildReportMessage } from "@core/tools/reportRenderer";
+import { buildReportMessage, type WorkbookView } from "@core/tools/reportRenderer";
 import type { DataStep, EvidenceItem, RuleTier, TurnPlan } from "./types";
+
+const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+function escHtml(s: string): string {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
 
 const VERIFIABLE_TOOLS = new Set([
   "aggregate_data", "check_data", "judge_data", "compare_data",
@@ -419,6 +432,43 @@ export async function executePlan(opts: {
           html: cardHtml,
           json: { reportHtml, messageId, contentType: reportJson.contentType },
         });
+      }
+
+      // Spreadsheet backup — a compact "Backup spreadsheet" tile (title + tab
+      // list) with Download .xlsx + Open in new tab, but no inline grid. The full
+      // grid opens in the standalone /sessions/workbook tab.
+      if (plan.provenance.report && (built.payload.nodes ?? []).length > 0) {
+        const ws = getSessionByDatabaseId(io.databaseId);
+        const resolveRows = (name: string) => {
+          const e = ws?.getDataEntry(name);
+          const rows = extractTable(e?.content_json ?? e?.content);
+          return Array.isArray(rows) ? (rows as Record<string, unknown>[]) : null;
+        };
+        const sheets = buildReviewWorkbookSheets(built.payload, resolveRows);
+        if (sheets.length > 0) {
+          const names = await nameWorkbookSheets(io.databaseId, sheets.map((s) => s.name));
+          sheets.forEach((s, i) => { if (names[i]) s.name = names[i]; });
+          const all = [buildInstructionsSheet(), ...sheets];
+          const buf = buildWorkbook(all);
+          const wbId = Date.now().toString();
+          const workbook: WorkbookView = {
+            sheets: all.map((s) => {
+              const g = rowsToGrid(s.rows, s.columns);
+              return { name: s.name, columns: g.columns, rows: g.rows, total: g.total };
+            }),
+          };
+          const dataUri = `data:${XLSX_MIME};base64,${buf.toString("base64")}`;
+          const tabList = workbook.sheets.map((s) => escHtml(s.name)).join(", ");
+          const html = `<div style="border:1px solid #e5e7eb;border-radius:10px;padding:14px 16px;background:#fff;">
+            <div style="font-size:14px;font-weight:600;color:#1e1b4b;margin-bottom:2px;">Backup spreadsheet</div>
+            <div style="font-size:12px;color:#6b7280;margin-bottom:12px;">${workbook.sheets.length} tab${workbook.sheets.length === 1 ? "" : "s"}: ${tabList}</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <a href="${dataUri}" download="data-analysis.xlsx" style="display:inline-flex;align-items:center;gap:6px;padding:8px 16px;background:#2563eb;color:#fff;border-radius:8px;text-decoration:none;font-size:13px;font-weight:600;font-family:sans-serif;border:2px solid #2563eb;">Download .xlsx</a>
+              <a href="/sessions/workbook?session_id=${encodeURIComponent(io.sessionId)}&amp;id=${encodeURIComponent(wbId)}" target="_blank" rel="noopener noreferrer" style="display:inline-flex;align-items:center;gap:6px;padding:8px 16px;background:#fff;color:#2563eb;border:2px solid #2563eb;border-radius:8px;text-decoration:none;font-size:13px;font-weight:600;font-family:sans-serif;">Open in new tab</a>
+            </div>
+          </div>`;
+          await io.addMessage({ id: wbId, html, json: { messageId: wbId, contentType: "xlsx", workbook } });
+        }
       }
 
       // Plan beat — propose an ordered remediation plan from the findings

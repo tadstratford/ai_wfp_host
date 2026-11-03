@@ -15,7 +15,7 @@ import {
   type QBOJournalEntryInput,
 } from "@capabilities/qbo/client";
 import { getSessionByDatabaseId } from "@backend/core/workspace/workspaceSessionStore";
-import { buildQboStatementHtml, mergeStatementMonths, type QboStatementRow, type StatementMonthRow } from "@capabilities/qbo/statementReport";
+import { buildQboStatementHtml, mergeStatementMonths, type QboStatementInput, type QboStatementRow, type StatementMonthRow } from "@capabilities/qbo/statementReport";
 import { saveDataEntry } from "@data";
 
 let currentScope: string | null = null;
@@ -268,13 +268,15 @@ export function renderStatementHtml(input: {
   });
 }
 
-/** Render a single fetched QBO report into a self-contained HTML statement. */
-export function statementHtml(
+/** Assemble a `QboStatementInput` from a raw fetched report — the single
+ *  flattening the HTML (`statementHtml`) and Excel (`buildQboStatementWorkbook`)
+ *  renderers share. */
+export function statementInput(
   report: any,
   title: string,
   accountingMethod: string,
   note: string | null,
-): string {
+): QboStatementInput {
   const header = report?.Header ?? {};
   const { columns, rows } = formatReportRows(report);
 
@@ -285,11 +287,15 @@ export function statementHtml(
       ? `${startPeriod} – ${endPeriod}`
       : endPeriod || startPeriod;
 
-  return renderStatementHtml({
+  const { workspace, company } = workspaceContext();
+
+  return {
+    workspace,
+    company,
     title,
-    method: accountingMethod,
-    currency: header.Currency ?? "",
     period,
+    currency: header.Currency ?? "",
+    accountingMethod,
     columns: columns.slice(1),
     rows: rows.map((r) => ({
       kind: r.kind as "section" | "summary" | "data",
@@ -298,6 +304,25 @@ export function statementHtml(
       values: r.values.map((v) => v.value),
     })),
     note,
+  };
+}
+
+/** Render a single fetched QBO report into a self-contained HTML statement. */
+export function statementHtml(
+  report: any,
+  title: string,
+  accountingMethod: string,
+  note: string | null,
+): string {
+  const input = statementInput(report, title, accountingMethod, note);
+  return renderStatementHtml({
+    title: input.title,
+    method: input.accountingMethod,
+    currency: input.currency,
+    period: input.period,
+    columns: input.columns,
+    rows: input.rows,
+    note: input.note,
   });
 }
 

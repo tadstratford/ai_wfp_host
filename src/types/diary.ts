@@ -5,9 +5,9 @@
 //
 // Three tiers with rolling compaction (lossy — raw entries are dropped after
 // summarization):
-//   entries   → hot window (≤ 60), full detail
-//   summaries → every 60 entries condensed into one (≤ 20)
-//   narrative → every 20 summaries rolled into the accumulating whole-file diary
+//   entries   → hot window (≤ 5), full detail
+//   summaries → every 5 entries condensed into one (≤ 5)
+//   narrative → every 5 summaries rolled into the accumulating whole-file diary
 
 export interface DiaryEntry {
   id: string;

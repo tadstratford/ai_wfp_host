@@ -14,4 +14,5 @@ export const COMPOSABLE_PRIMITIVES = [
   "check_data", "compare_data", "save_data", "set_param", "get_param",
   "reconcile_relationship", "list_relationships", "profile_data", "classify_data",
   "split_data", "report_table", "chat_download", "show_message",
+  "export_workbook", "view_workbook",
 ];

@@ -525,11 +525,12 @@ function disabledToolNames(databaseId: string): Set<string> {
 // primitives, rules, QBO reads, and planning tools.
 const ALWAYS_AVAILABLE = [
   "show_message", "chat_download", "set_param", "get_param", "save_data",
+  "export_workbook", "view_workbook", "build_workbook",
   "list_data", "get_data", "aggregate_data", "resolve_data_shape", "judge_data",
   "compare_data",
   "reconcile_relationship", "list_relationships",
   "profile_data", "classify_data", "split_data",
-  "report_table", "report_qbo_pnl", "report_qbo_bs",
+  "report_table", "report_qbo_pnl", "report_qbo_bs", "export_qbo_pnl", "export_qbo_bs",
   "list_skills", "get_skill",
   "create_skill", "update_skill", "delete_skill",
   "run_workflow",
@@ -547,6 +548,7 @@ const COMPOSABLE_PRIMITIVES = [
   "check_data", "compare_data", "save_data", "set_param", "get_param",
   "reconcile_relationship", "profile_data", "classify_data", "split_data",
   "report_table", "report_qbo_pnl", "report_qbo_bs", "report_plan_variance", "report_plan_cash_forecast",
+  "export_qbo_pnl", "export_qbo_bs",
   "chat_download", "show_message",
 ];
 

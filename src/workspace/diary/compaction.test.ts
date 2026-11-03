@@ -53,7 +53,7 @@ describe("summarizeSummaries", () => {
 
 describe("compaction thresholds", () => {
   test("constants match the agreed cadence", () => {
-    expect(ENTRIES_PER_SUMMARY).toBe(60);
-    expect(SUMMARIES_PER_NARRATIVE).toBe(20);
+    expect(ENTRIES_PER_SUMMARY).toBe(5);
+    expect(SUMMARIES_PER_NARRATIVE).toBe(5);
   });
 });

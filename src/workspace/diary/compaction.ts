@@ -9,8 +9,8 @@ import { randomUUID } from "node:crypto";
 import type { DiaryEntry, DiarySummary, DiaryNarrative } from "wfp-format";
 import { hashValue } from "../hash";
 
-export const ENTRIES_PER_SUMMARY = 60;
-export const SUMMARIES_PER_NARRATIVE = 20;
+export const ENTRIES_PER_SUMMARY = 5;
+export const SUMMARIES_PER_NARRATIVE = 5;
 /** Max entry summaries retained in a summary's `sample` (for LLM highlights). */
 export const SAMPLE_LIMIT = 4;
 

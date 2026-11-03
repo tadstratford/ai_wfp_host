@@ -1,25 +1,47 @@
-export type ReportContentType = "html" | "csv" | "json" | "text";
+export type ReportContentType = "html" | "csv" | "json" | "text" | "xlsx";
+
+/** A single sheet's full grid for the standalone `/sessions/workbook` viewer. */
+export interface WorkbookSheetData {
+  name: string;
+  columns: string[];
+  rows: (string | number | boolean)[][];
+  total: number;
+}
+
+/** The full multi-sheet payload threaded onto a workbook chat message so the
+ *  standalone tab can render every row (the inline `preview` stays capped). */
+export interface WorkbookView {
+  sheets: WorkbookSheetData[];
+}
 
 const MIME: Record<ReportContentType, string> = {
   html: "text/html",
   csv: "text/csv",
   json: "application/json",
   text: "text/plain",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 };
 
 export function buildReportMessage(
-  content: string,
+  content: string | Buffer,
   filename: string,
   sessionId?: string,
   contentType: ReportContentType = "html",
   messageId?: string,
-): { html: string; json: { reportHtml: string; messageId: string; contentType: ReportContentType } } {
+  preview?: Record<string, unknown>,
+  workbook?: WorkbookView,
+): { html: string; json: { reportHtml: string; messageId: string; contentType: ReportContentType; kind?: string; preview?: unknown; workbook?: WorkbookView } } {
   const mime = MIME[contentType] ?? MIME.html;
-  const b64 = Buffer.from(content, "utf-8").toString("base64");
+  const b64 = Buffer.isBuffer(content)
+    ? content.toString("base64")
+    : Buffer.from(content, "utf-8").toString("base64");
   const dataUri = `data:${mime};base64,${b64}`;
   const resolvedMessageId = messageId ?? Date.now().toString();
   const reportUrl = sessionId
     ? `/sessions/report?session_id=${encodeURIComponent(sessionId)}&id=${encodeURIComponent(resolvedMessageId)}`
+    : "";
+  const workbookUrl = sessionId
+    ? `/sessions/workbook?session_id=${encodeURIComponent(sessionId)}&id=${encodeURIComponent(resolvedMessageId)}`
     : "";
 
   const downloadBtn = `<a
@@ -33,10 +55,12 @@ export function buildReportMessage(
     Download
   </a>`;
 
-  // Open-in-new-tab only makes sense for HTML (the report route returns HTML).
-  const openTabBtn = contentType === "html" && sessionId
+  // Open-in-new-tab: HTML reports resolve via /sessions/report; Excel workbooks
+  // resolve via /sessions/workbook (a standalone, chrome-free grid).
+  const openUrl = contentType === "html" ? reportUrl : contentType === "xlsx" ? workbookUrl : "";
+  const openTabBtn = openUrl
     ? ` <a
-      href="${reportUrl}"
+      href="${openUrl}"
       target="_blank"
       rel="noopener noreferrer"
       onclick="window.open(this.href, '_blank'); return false;"
@@ -61,12 +85,21 @@ export function buildReportMessage(
   </div>`
     : "";
 
+  const reportHtmlString = Buffer.isBuffer(content) ? "" : content;
+
   return {
     html: `<div>
       <div style="display:flex;flex-wrap:wrap;align-items:center;margin-bottom:8px;">${downloadBtn}${openTabBtn}</div>
       ${inlinePreview}
       ${dataHint}
     </div>`,
-    json: { reportHtml: content, messageId: resolvedMessageId, contentType },
+    json: {
+      reportHtml: reportHtmlString,
+      messageId: resolvedMessageId,
+      contentType,
+      ...(preview?.kind ? { kind: preview.kind as string } : {}),
+      ...(preview ? { preview } : {}),
+      ...(workbook ? { workbook } : {}),
+    },
   };
 }

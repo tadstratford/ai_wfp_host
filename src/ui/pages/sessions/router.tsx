@@ -17,6 +17,8 @@ import { sendHandler, buildSendHandler } from "./chatStream/sendHandler";
 import { deleteSessionHandler } from "./sessionList/deleteSessionHandler";
 import { exportHandler } from "./chatStream/exportHandler";
 import { reportHandler } from "./reportHandler";
+import { workbookHandler } from "./workbookHandler";
+import { workbookBuilderHandler, workbookBuilderDataHandler, workbookBuilderDownloadHandler } from "./workbookBuilder";
 import { chatHistoryHandler } from "./chatStream/chatHistory";
 import { savedPromptsHandler, savePromptHandler, deleteSavedPromptHandler } from "./chatStream/SavedPrompts";
 import { dataRefsHandler } from "./chatStream/DataRefs";
@@ -79,6 +81,10 @@ sessionsRouter.post("/save-as-workflow/build", saveAsWorkflowBuildHandler);
 sessionsRouter.delete("/sessions/:id", deleteSessionHandler);
 sessionsRouter.get("/export/:id", exportHandler);
 sessionsRouter.get("/report", reportHandler);
+sessionsRouter.get("/workbook", workbookHandler);
+sessionsRouter.get("/workbook-builder", workbookBuilderHandler);
+sessionsRouter.get("/workbook-builder/data", workbookBuilderDataHandler);
+sessionsRouter.post("/workbook-builder/download", workbookBuilderDownloadHandler);
 
 // Form submission (interactive forms in chat sessions)
 import { formSubmitHandler } from "./formHandler";

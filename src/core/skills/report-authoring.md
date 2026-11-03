@@ -46,6 +46,15 @@ self-contained HTML:
 
 These are deterministic and workflow-reproducible, like `report_table`.
 
+When the user asks for the statement **as an Excel workbook** ("put it into
+Excel", "workbook", ".xlsx"), use the dedicated exporters instead — they render
+the same native statement into a formatted single-sheet `.xlsx` (bold section
+headers, indented line items, ruled subtotals, currency-formatted numbers) and
+deliver the download directly, no `chat_download` step needed:
+
+1. `export_qbo_pnl(start_date, end_date, summarize_column_by?, accounting_method?)`
+   for the P&L, or `export_qbo_bs(...)` for the balance sheet.
+
 The recipe below (CSS + helpers) is for **bespoke** reports — dashboards, charts,
 or layouts `report_table` can't express.
 
@@ -160,8 +169,12 @@ their rows, say which row and why; never silently drop a difference.
 - `save_data` — persist the combined `staging_*` table before delivering a multi-source report
 - `report_table` — deterministic drill-down HTML report from a summary + detail table
 - `report_qbo_pnl` / `report_qbo_bs` — deterministic native-QBO-style P&L / Balance Sheet reports
+- `export_qbo_pnl` / `export_qbo_bs` — the same statements as a formatted Excel workbook (delivered directly)
 - `report_plan_variance` — deterministic budget-vs-actual variance HTML report (pair with `chat_download`)
 - `chat_download` — deliver the finished self-contained HTML report
+- `export_workbook` — build a multi-sheet Excel workbook (transcript + data tables)
+- `view_workbook` — show an uploaded Excel workbook inline (tabs = sheets, no formatting)
+- `build_workbook` — open the interactive workbook builder (user picks tables → sheets, downloads as .xlsx)
 - `get_data`, `list_data`, `aggregate_data` — read the workspace data the report is built from
 - `set_param`, `get_param` — hold intermediate tables while building
 - `show_message` — short progress/status notes only
@@ -170,4 +183,8 @@ their rows, say which row and why; never silently drop a difference.
 - When a report combines two or more source tables, persist the combined table as workspace data via `save_data` with a name starting with `staging_` (unprefixed) before delivering the report.
 - Deliver reports as a self-contained HTML document via `chat_download(data = <full HTML>, filename = "report.html")`. Do not dump the report as plain markdown.
 - To deliver a hand-written HTML report, either (a) pass the full HTML inline — `chat_download(data = <full HTML>, filename = "report.html")` — or (b) stage it first with `set_param(name = "<name>", value = <full HTML>, type = "text")` and then deliver it by name — `chat_download(param = "<name>", filename = "report.html", content_type = "html")`. Never use `chat_download(data = "{{result}}")` immediately after a `set_param` — `{{result}}` resolves to the set_param confirmation text ("Parameter … set as …"), not the HTML you stored.
+- For an Excel export, use `export_workbook` (multi-sheet: transcript + tabular data files) or `chat_download(param = "<name>", content_type = "xlsx")` for a single table. Never emit .xlsx bytes inline.
+- For a QBO P&L / Balance Sheet requested as Excel, use `export_qbo_pnl` / `export_qbo_bs` (formatted statement) — not `export_workbook` and not the HTML path.
+- To show an uploaded workbook inline (tabs per sheet, no formatting), call `view_workbook(name = "<workbook base name>")`.
+- When the user asks to assemble a multi-table Excel workbook and pick the tables themselves (e.g. "make me an interco analysis workbook"), call `build_workbook(data_names = [...])` to open the workbook builder — the user chooses which tables become sheets and downloads the `.xlsx` in the new tab.
 - Copy the brand-token CSS block verbatim; escape user text with `esc()` and format money with `fmt()`.

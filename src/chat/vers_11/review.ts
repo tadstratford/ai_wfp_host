@@ -9,6 +9,7 @@
 import { aggregator } from "../../mcp/aggregator";
 import { setParameterValue } from "@backend/core/settings/parameterHelpers";
 import { getSessionByDatabaseId } from "@backend/core/workspace/workspaceSessionStore";
+import type { WorkbookSheet } from "@shared/wfp-api/xlsx";
 import type { EvidenceItem } from "./types";
 
 function extractTextContent(mcpResult: any): string {
@@ -1170,6 +1171,93 @@ footer{margin-top:18px;color:var(--muted);font-size:12px}
 }
 
 // ────────────────────────────────────────────────────────────────
+// Spreadsheet backup — a .xlsx workbook assembled from the same review payload
+// the HTML report uses: one sheet per reviewed table (concise sheet name, not
+// the long data name) plus Verdicts + Variances summary sheets. `resolveRows`
+// materializes a table's rows from the workspace by data name.
+
+/** Concise, human-friendly sheet name from a table's menu label (shorter than
+ *  the raw data name; strips the long shared prefixes the report scope uses). */
+export function shortSheetName(label: string): string {
+  const out = label
+    .trim()
+    .replace(/\s+/g, " ")
+    .replace(/^allocation\s+basis\s+tables?\s+/i, "")
+    .replace(/^allocation\s+table\s+/i, "")
+    .replace(/^net\s+intercompany\s+position\b/i, "Net position")
+    .replace(/^exceptions\s+items\s+requiring\s+bookkeeper\s+action\b/i, "Exceptions")
+    .replace(/^ic\s+/i, "IC ")
+    .replace(/\s+by\s+entity\s+(?!pair\b)/i, " ");
+  return out || label.trim() || "Sheet";
+}
+
+/** A lead "Instructions" sheet — the first tab explaining what the workbook is,
+ *  how to read its tabs, and how the figures were produced. */
+export function buildInstructionsSheet(): WorkbookSheet {
+  return {
+    name: "Instructions",
+    columns: ["Section", "Detail"],
+    rows: [
+      {
+        Section: "What is this?",
+        Detail: "Backup spreadsheet for the data review. The HTML report is the primary deliverable; this workbook carries the underlying data tables plus the review's Verdicts and Variances for audit and tie-out.",
+      },
+      {
+        Section: "Tabs",
+        Detail: "One tab per reviewed table (data exactly as loaded), then \"Verdicts\" (per-category findings) and \"Variances\" (differences between two sources for the same entity).",
+      },
+      {
+        Section: "Provenance",
+        Detail: "Deterministic — every figure was read directly from the workspace data by the review tools; no AI wrote the numbers.",
+      },
+      {
+        Section: "Snapshot",
+        Detail: "Read-only snapshot. Re-run the analysis to regenerate from current data.",
+      },
+    ],
+  };
+}
+
+export function buildReviewWorkbookSheets(
+  review: ReviewPayload,
+  resolveRows: (dataName: string) => Record<string, unknown>[] | null,
+): WorkbookSheet[] {
+  const sheets: WorkbookSheet[] = [];
+
+  for (const node of review.nodes ?? []) {
+    const rows = resolveRows(node.id);
+    if (!rows || rows.length === 0) continue;
+    sheets.push({ name: shortSheetName(node.label || node.id), rows });
+  }
+
+  if ((review.verdicts ?? []).length > 0) {
+    sheets.push({
+      name: "Verdicts",
+      rows: review.verdicts.map((v) => ({
+        Category: v.category,
+        Verdict: htmlVerdictLabel(v.severity),
+        Summary: v.summary,
+        Basis: v.basis,
+      })),
+    });
+  }
+
+  if ((review.variances ?? []).length > 0) {
+    sheets.push({
+      name: "Variances",
+      rows: review.variances.map((v) => ({
+        Key: v.key,
+        Left: v.left,
+        Right: v.right,
+        Difference: v.diff,
+      })),
+    });
+  }
+
+  return sheets;
+}
+
+// ────────────────────────────────────────────────────────────────
 // Remediation ("plan" beat) — the LLM proposes an ordered list of actions from
 // the deterministic findings, each referencing the `verdict-*`/`var-*` refs it
 // resolves. Read-only: actions are recommendations, not execution. A
@@ -1265,6 +1353,46 @@ export async function buildRemediationPlan(opts: {
   } catch (err: any) {
     console.warn(`[vers_11] remediation plan failed (falling back to deterministic): ${err.message}`);
     return { actions: deterministicPlan(opts.review), unavailable: true };
+  }
+}
+
+// ────────────────────────────────────────────────────────────────
+// Sheet naming — an LLM proposes concise worksheet names (31 chars or fewer) for
+// the workbook's already-shortened table labels, with a deterministic fallback
+// to the labels themselves. Naming is generative, so the LLM is the right tool;
+// it never writes figures, only renames tabs.
+
+export async function nameWorkbookSheets(
+  databaseId: string,
+  labels: string[],
+): Promise<string[]> {
+  if (labels.length === 0) return [];
+
+  const systemPrompt =
+    "You are naming Excel worksheet tabs for a data-analysis workbook. " +
+    "Given a list of table labels (already shortened from raw data names), return " +
+    "concise, human-readable sheet names: 31 characters or fewer each, title case, " +
+    "no underscores, no trailing punctuation. Keep entity/company names verbatim where " +
+    "they appear. Respond with JSON only: {\"names\":[\"<name>\", ...]} with exactly one " +
+    "entry per input label, in order.";
+
+  try {
+    const result = await llmCall(databaseId, "chat:story-plan", {
+      systemPrompt,
+      messages: [{ role: "user", content: labels.map((l, i) => `${i + 1}. ${l}`).join("\n") }],
+      maxTokens: 400,
+      temperature: 0,
+      responseFormat: "json",
+    });
+    const data = (result.data ?? {}) as Record<string, unknown>;
+    const names = Array.isArray(data.names) ? (data.names as unknown[]) : [];
+    return labels.map((label, i) => {
+      const n = names[i];
+      return typeof n === "string" && n.trim() ? n.trim().slice(0, 31) : label;
+    });
+  } catch (err: any) {
+    console.warn(`[vers_11] sheet naming failed (falling back to labels): ${err.message}`);
+    return labels;
   }
 }
 
