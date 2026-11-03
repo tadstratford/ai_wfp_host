@@ -11,6 +11,7 @@ import listRelationships from "./list_relationships";
 import profileData from "./profile_data";
 import classifyData from "./classify_data";
 import splitData from "./split_data";
+import tieOut from "./tie_out";
 
 export const tools = [
   listData,
@@ -26,4 +27,5 @@ export const tools = [
   profileData,
   classifyData,
   splitData,
+  tieOut,
 ];

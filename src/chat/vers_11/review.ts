@@ -687,6 +687,68 @@ export function buildReview(
 }
 
 // ────────────────────────────────────────────────────────────────
+/** Render the deterministic `tie_out` tool result as a per-schedule tie-out
+ *  table — the direct answer to "do the supporting schedules tie to the trial
+ *  balance". No LLM narration: figures and verdicts are templated verbatim. */
+export function renderTieOutReport(text: string): { markdown: string; payload: unknown } {
+  let data: any;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    return { markdown: "⚠ Tie-out could not be parsed.", payload: null };
+  }
+
+  const summary = data?.summary ?? {};
+  const rows = Array.isArray(data?.schedules) ? data.schedules : [];
+
+  const verdict = (status: string) =>
+    status === "tie"
+      ? "✅ Tie"
+      : status === "variance"
+        ? "🔴 Variance"
+        : status === "unmatched"
+          ? "❓ Unmatched"
+          : "⚠ Unresolved";
+
+  const money = (n: number | null) => (typeof n === "number" ? fmtMoney(n) : "—");
+
+  const tableRows = rows
+    .map((r: any) => {
+      const accts = Array.isArray(r?.tb_accounts) ? r.tb_accounts.join(", ") : "";
+      return (
+        `| \`${r.schedule}\` | ${accts || "—"} | ${money(r.schedule_total)} | ` +
+        `${money(r.tb_balance)} | ${money(r.variance)} | ${verdict(r.status)} |`
+      );
+    })
+    .join("\n");
+
+  const lines: string[] = [
+    "## Tie-out: do the supporting schedules tie to the trial balance?",
+    "",
+    "| Schedule | TB account(s) | Schedule total | TB balance | Variance | Verdict |",
+    "|---|---|---|---|---|---|",
+    tableRows || "| _no schedules_ | — | — | — | — | — |",
+    "",
+    `**Summary** — ${summary.tied ?? 0} tie, ${summary.variance ?? 0} variance, ` +
+      `${summary.unmatched ?? 0} unmatched, ${summary.unresolved ?? 0} unresolved.`,
+  ];
+
+  const unresolved = rows.filter((r: any) => r.status === "unresolved");
+  if (unresolved.length > 0) {
+    lines.push("", "### Could not resolve");
+    for (const r of unresolved) lines.push(`- \`${r.schedule}\` — ${r.basis}`);
+  }
+
+  const unmatched = rows.filter((r: any) => r.status === "unmatched");
+  if (unmatched.length > 0) {
+    lines.push("", "### Unmatched");
+    for (const r of unmatched) lines.push(`- \`${r.schedule}\` — ${r.basis}`);
+  }
+
+  return { markdown: lines.join("\n"), payload: data };
+}
+
+// ────────────────────────────────────────────────────────────────
 /** Columns whose name suggests a numeric "amount" to foot/reconcile. */
 const AMOUNT_HINT = /amount|total|balance|debit|credit|fee|revenue|cost|principal|interest|value|price|gross|net|sum/i;
 

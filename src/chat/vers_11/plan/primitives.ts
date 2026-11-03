@@ -13,7 +13,7 @@ export const COMPOSABLE_PRIMITIVES = [
   "get_data", "list_data", "resolve_data_shape", "aggregate_data", "judge_data",
   "check_data", "compare_data", "save_data", "set_param", "get_param",
   "reconcile_relationship", "list_relationships", "profile_data", "classify_data",
-  "split_data", "report_table", "chat_download", "show_message",
+  "split_data", "tie_out", "report_table", "chat_download", "show_message",
   "export_workbook", "view_workbook",
   "export_qbo_pnl", "export_qbo_bs",
 ];

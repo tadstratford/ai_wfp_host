@@ -26,7 +26,7 @@ import type { PlanRequest } from "./plan/planner";
 import { COMPOSABLE_PRIMITIVES } from "./plan/primitives";
 import { withTimeout } from "./util";
 import type { OrchestratorIO } from "./types";
-import { buildReview, renderReviewReport, reconcileReviewEvidence, buildReviewReportHtml, buildReviewWorkbookSheets, buildInstructionsSheet, nameWorkbookSheets, buildRemediationPlan } from "./review";
+import { buildReview, renderReviewReport, reconcileReviewEvidence, buildReviewReportHtml, buildReviewWorkbookSheets, buildInstructionsSheet, nameWorkbookSheets, buildRemediationPlan, renderTieOutReport } from "./review";
 import { loadConfig } from "./config";
 import { verifyResultLlm, shouldVerify, verdictPasses } from "./verify";
 import { buildReportMessage, type WorkbookView } from "@core/tools/reportRenderer";
@@ -45,6 +45,7 @@ function escHtml(s: string): string {
 const VERIFIABLE_TOOLS = new Set([
   "aggregate_data", "check_data", "judge_data", "compare_data",
   "reconcile_relationship", "profile_data", "classify_data", "split_data",
+  "tie_out",
 ]);
 
 function extractTextContent(mcpResult: any): string {
@@ -281,6 +282,7 @@ export async function executePlan(opts: {
   const toolsUsed: string[] = [];
   const { plan, io, session } = opts;
   let relationshipsOutput: unknown = null;
+  let tieOutOutput: string | null = null;
   let rendered = false;
   let finalDataTool: string | null = null;
   let finalDataText: string | null = null;
@@ -357,6 +359,7 @@ export async function executePlan(opts: {
         toolsUsed.push(step.tool);
         const resultValue = parseToolOutput(full);
         if (step.tool === "list_relationships") relationshipsOutput = resultValue;
+        if (step.tool === "tie_out") tieOutOutput = full;
         finalDataTool = step.tool;
         finalDataText = full;
         if (isMutatingTool(step.tool)) {
@@ -397,6 +400,17 @@ export async function executePlan(opts: {
 
   // ── Finalize: review report (review-shaped) + rule-check summary ──────────
   if (opts.reviewShaped) {
+    // Tie-out requests: render the deterministic schedule↔TB comparison directly
+    // (the generic review battery profiles/checks tables but never ties out).
+    const tieOutEvidence = evidence.find((e) => e.tool === "tie_out");
+    if (tieOutEvidence && tieOutOutput) {
+      const tieOut = renderTieOutReport(tieOutOutput);
+      replyMarkdown = tieOut.markdown;
+      await io.addMessage({
+        markdown: tieOut.markdown,
+        json: { kind: "tie-out", payload: tieOut.payload, skills: plan.provenance.skills },
+      });
+    } else {
     // Dynamic reconcile + aggregate diff — the valuation/agreement evidence the
     // battery alone doesn't produce (reuses v9's reconciliation phase).
     const reconciled = await reconcileReviewEvidence({
@@ -501,6 +515,7 @@ export async function executePlan(opts: {
         markdown: `I found several tables that could be reconciled. Reply with the number of the pair:\n\n${menu}`,
         json: { kind: "meta" },
       });
+    }
     }
   }
 

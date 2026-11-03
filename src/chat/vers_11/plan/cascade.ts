@@ -927,7 +927,7 @@ const PRIMARY_GROUP_HINT = /entity|account|name|from\b|to\b|status|class|type|ca
  *  exists, so a "Txn ID" column doesn't win over "From Entity". */
 const SECONDARY_GROUP_HINT = /code|ref|id\b|period|date/i;
 
-interface ReviewEntry {
+export interface ReviewEntry {
   name: string;
   columns: string[];
   columnTypes: Record<string, string> | null;
@@ -1073,6 +1073,95 @@ async function dataReviewPlan(
   return { kind: "plan", plan: { steps }, report: flags.report, missingRequired: [] };
 }
 
+// ── tie-out shape: deterministic schedule ↔ trial-balance reconciliation ────
+// "do the supporting schedules tie to the trial balance" — a focused plan that
+// identifies the trial balance and the supporting schedules, then runs the
+// deterministic `tie_out` tool (rather than the generic review battery, which
+// profiles/checks tables but never actually compares schedule totals to the TB).
+
+const DEBIT_HINT = /debit|\bdr\b/i;
+const CREDIT_HINT = /credit|\bcr\b/i;
+
+/** Identify the trial-balance table: name first, else a table with both a
+ *  debit-ish and a credit-ish numeric column. */
+export function detectTrialBalance(inventory: ReviewEntry[]): ReviewEntry | null {
+  const byName = inventory.filter((d) => /trial\s*balance/i.test(d.name));
+  if (byName.length > 0) return byName.sort((a, b) => b.rowCount - a.rowCount)[0];
+  const dual = inventory.filter((d) => {
+    const hasDebit = d.columns.some((c) => DEBIT_HINT.test(c) && isNumericColumn(c, d.columnTypes));
+    const hasCredit = d.columns.some((c) => CREDIT_HINT.test(c) && isNumericColumn(c, d.columnTypes));
+    return hasDebit && hasCredit;
+  });
+  return dual.sort((a, b) => b.rowCount - a.rowCount)[0] ?? null;
+}
+
+/** The supporting schedule tables: every other loaded table with rows. */
+export function scheduleTables(inventory: ReviewEntry[], tbName: string): ReviewEntry[] {
+  return inventory.filter(
+    (d) =>
+      d.name !== tbName &&
+      !d.name.startsWith("staging_") &&
+      !d.name.startsWith("source_") &&
+      d.rowCount > 0,
+  );
+}
+
+/** Build the tie-out plan: bulk read the trial balance + schedules, then run the
+ *  deterministic `tie_out` comparison. Fail-closed: clarify when no trial
+ *  balance is identifiable, fallback when there is nothing to tie out. */
+async function tieOutPlan(
+  req: PlanRequest,
+  flags: Flags,
+  ctx: ShapeContext,
+): Promise<PlanResult> {
+  void ctx;
+  const inventory = reviewInventory(req.databaseId).filter((d) => !d.name.startsWith("staging_"));
+
+  const tb = detectTrialBalance(inventory);
+  if (!tb) {
+    const names = inventory.filter((d) => d.rowCount > 0).map((d) => d.name);
+    return {
+      kind: "clarify",
+      missing: ["tie_out.trial_balance"],
+      question:
+        `I couldn't identify the trial balance among the loaded tables. ` +
+        `Which table is the trial balance? Loaded: ${names.length ? names.map((n) => `\`${n}\``).join(", ") : "(none)"}.`,
+    };
+  }
+
+  const schedules = scheduleTables(inventory, tb.name);
+  if (schedules.length === 0) {
+    return { kind: "fallback", reason: "no supporting schedule tables to tie out" };
+  }
+
+  const steps: PlanStep[] = [
+    {
+      tool_id: "get_data",
+      tool_parameters: { names: [tb.name, ...schedules.map((s) => s.name)] },
+      label: `Read trial balance + ${schedules.length} schedule${schedules.length === 1 ? "" : "s"}`,
+      beat: "setup",
+    },
+    {
+      tool_id: "tie_out",
+      tool_parameters: { trial_balance: tb.name, schedules: schedules.map((s) => s.name) },
+      label: `Tie ${schedules.length} schedule${schedules.length === 1 ? "" : "s"} to the trial balance`,
+      beat: "status",
+    },
+  ];
+
+  const missingRequired: string[] = [];
+  for (const s of steps) {
+    for (const m of await stepMissing(s.tool_id, s.tool_parameters)) {
+      missingRequired.push(`${s.tool_id}.${m}`);
+    }
+  }
+  if (missingRequired.length > 0) {
+    return { kind: "fallback", reason: `missing required: ${missingRequired.join(", ")}` };
+  }
+
+  return { kind: "plan", plan: { steps }, report: false, missingRequired: [] };
+}
+
 // ── Shape registry ──────────────────────────────────────────────────────────
 // Dispatch order is priority (descending). The classifier fan-out and the
 // dispatch loop in `plan()` are both derived from this table.
@@ -1125,6 +1214,16 @@ const SHAPES: ShapeDef[] = [
     },
     matches: (f) => f.planning_forecast,
     build: async (req) => planningForecastPlan(req),
+  },
+  {
+    id: "tie-out",
+    priority: 60,
+    nouls: {
+      tieout:
+        "Does this request ask to verify that supporting schedules / sub-ledgers / detail listings tie to (agree with / reconcile to) the trial balance — i.e. whether each schedule's total equals its trial-balance account balance?",
+    },
+    matches: (f) => f.tieout,
+    build: (req, flags, ctx) => tieOutPlan(req, flags, ctx),
   },
   {
     id: "data-review",
@@ -1302,6 +1401,18 @@ function wantsReport(raw: string): boolean {
   return /\b(report|dashboard|download|html|export|deliverable|file)\b/i.test(raw);
 }
 
+/** Deterministic tie-out intent: a "tie"/"reconcile"/"agree"/"foot" verb aimed at
+ *  a trial balance or supporting schedule/detail target. Checked BEFORE the story
+ *  dispatch so a tie-out request routes to `tieOutPlan` regardless of the
+ *  selected story archetype (the review recipe would otherwise run the generic
+ *  review battery, which never ties schedules out). */
+export function isTieOutRequest(raw: string): boolean {
+  const t = raw.toLowerCase();
+  const verb = /\btie(s|d)?\b|tie[- ]?out|\breconcil|\bagree(s|d)?\b|\bfoot(s|ed)?\b/.test(t);
+  const target = /\b(trial\s*balance|\btb\b|schedule|supporting|sub[- ]?ledger|detail)\b/.test(t);
+  return verb && target;
+}
+
 /** Which deterministic recipe a story's beats imply — the beat templates select
  *  the recipe, so a user-authored story with the same beats reuses it. */
 function storyRecipe(beats: Beat[]): "review" | "report" | "quick-fact" | null {
@@ -1321,6 +1432,12 @@ export const cascadePlanner: Planner = {
     const stmt = qboStatementType(req.rawMessage);
     if (stmt) {
       return await qboStatementPlan(req, stmt);
+    }
+
+    // Tie-out gate — a "do the schedules tie to the trial balance" request is a
+    // tie-out, not a generic review, regardless of the story archetype.
+    if (isTieOutRequest(req.rawMessage)) {
+      return await tieOutPlan(req, {}, { dataFiles: [] });
     }
 
     // Beat-driven dispatch — the selected story's beats select the recipe, so a
