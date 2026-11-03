@@ -10,7 +10,7 @@ import type { Beat, BeatTemplateId, StoryArchetype, VerifyRule } from "wfp-forma
 
 interface RawBeat {
   id?: string;
-  skill?: string;
+  skills?: string[];
   template?: string;
   verify?: string;
   write?: boolean;
@@ -29,6 +29,9 @@ const TEMPLATES = new Set<string>([
 const VERIFY_RULES = new Set<string>([
   "none", "accurate", "grounded-actionable", "complete-accurate", "balanced",
 ]);
+
+export const BEAT_TEMPLATES: BeatTemplateId[] = Array.from(TEMPLATES) as BeatTemplateId[];
+export const BEAT_VERIFY_RULES: VerifyRule[] = Array.from(VERIFY_RULES) as VerifyRule[];
 
 function parseJsonArray<T>(raw: string): T[] {
   const parsed = JSON.parse(raw);
@@ -76,9 +79,14 @@ function parseStory(raw: string, fileName: string): StoryArchetype {
     if (!b.id || !b.template) throw new Error(`story "${fm.name}" has a beat without id/template`);
     if (!TEMPLATES.has(b.template)) throw new Error(`story "${fm.name}" beat "${b.id}" has unknown template "${b.template}"`);
     if (!b.verify || !VERIFY_RULES.has(b.verify)) throw new Error(`story "${fm.name}" beat "${b.id}" has unknown verify "${b.verify}"`);
+    const skills = (b.skills ?? []).map((s) => {
+      const name = typeof s === "string" ? s.trim() : "";
+      if (!name) throw new Error(`story "${fm.name}" beat "${b.id}" has an empty skill name`);
+      return name;
+    });
     return {
       id: b.id,
-      ...(b.skill ? { skill: b.skill } : {}),
+      ...(skills.length ? { skills } : {}),
       template: b.template as BeatTemplateId,
       verify: b.verify as VerifyRule,
       ...(b.write ? { write: true } : {}),

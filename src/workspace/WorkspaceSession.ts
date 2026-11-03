@@ -33,6 +33,7 @@ import type {
   DiaryEntry,
 } from "wfp-format";
 import type { Rule } from "wfp-format/rule";
+import type { StoryArchetype } from "wfp-format/story";
 import type { LLMLogEntry } from "wfp-format/logs";
 import { getRules as _rulesGetAll, getRule as _rulesGetOne, upsertRule as _rulesUpsert, deleteRule as _rulesDelete } from "../rules/store";
 import { randomUUID } from "node:crypto";
@@ -527,6 +528,43 @@ export class WorkspaceSession {
     return deleted;
   }
 
+  // ── Stories (top-level `stories` node — workspace-authored meta-plans) ──
+  getStories(): StoryArchetype[] {
+    this.#assertOpen();
+    return structuredClone(this.#wfp.stories ?? []);
+  }
+
+  getStory(id: string): StoryArchetype | null {
+    this.#assertOpen();
+    const found = this.#wfp.stories?.find((s) => s.id === id);
+    return found ? structuredClone(found) : null;
+  }
+
+  upsertStory(story: StoryArchetype): void {
+    this.#assertOpen();
+    if (!this.#wfp.stories) this.#wfp.stories = [];
+    const idx = this.#wfp.stories.findIndex((s) => s.id === story.id);
+    const clone = structuredClone(story);
+    if (idx >= 0) this.#wfp.stories[idx] = clone;
+    else this.#wfp.stories.push(clone);
+    this.#recordChange(`story:${story.id}`, "upsert", clone);
+    this.recordDiaryEntry({ summary: `Saved story "${story.id}"`, tags: ["story"] });
+    this.touch("misc");
+  }
+
+  deleteStory(id: string): boolean {
+    this.#assertOpen();
+    const before = this.#wfp.stories?.length ?? 0;
+    this.#wfp.stories = (this.#wfp.stories ?? []).filter((s) => s.id !== id);
+    const deleted = (this.#wfp.stories.length ?? 0) < before;
+    if (deleted) {
+      this.#recordChange(`story:${id}`, "delete", null);
+      this.recordDiaryEntry({ summary: `Deleted story "${id}"`, tags: ["story"] });
+      this.touch("misc");
+    }
+    return deleted;
+  }
+
   // ── LLM logs (top-level `logs` node — LLMLogEntry[]) ─────────────────
   getLogs(): LLMLogEntry[] {
     this.#assertOpen();
@@ -771,6 +809,7 @@ export class WorkspaceSession {
       case "tool": return this.#wfp.tools?.find((t) => t.tool_id === name) ?? null;
       case "knowledge": return this.#wfp.knowledge?.find((p) => p.name === name) ?? null;
       case "rule": return this.#wfp.skills?.find((s) => s.name === name) ?? null;
+      case "story": return this.#wfp.stories?.find((s) => s.id === name) ?? null;
       case "session": return this.#wfp.sessions?.find((s) => s.id === name) ?? null;
       case "log": return this.#wfp.logs?.find((l) => l.id === name) ?? null;
       case "metadata": return this.#wfp.metadata ?? null;

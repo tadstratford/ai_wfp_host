@@ -10,8 +10,6 @@ const manifest: CapabilityManifest = {
   description: "Outbound email via Resend (send_email), subject to the workspace outbound allowlist.",
   trust: "core",
   kind: "builtin",
-  group: { key: "email-outbound", label: "Email Outbound", defaultEnabled: false },
-  skills: ["email-outbound"],
 };
 
 export const emailsCapability: CapabilityModule = {

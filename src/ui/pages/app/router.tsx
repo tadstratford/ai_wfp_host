@@ -118,7 +118,9 @@ import {
 import { userScreenView } from "@frontend/pages/user/page";
 import { accountStandaloneView } from "@frontend/pages/account/page";
 import { workspaceDownloadModalHandler } from "./workspace/downloadModal";
-import { skillsView, skillsSaveHandler } from "./skills/skillsPanel";
+import { skillsView } from "./skills/skillsPanel";
+import { storiesView } from "./skills/storiesPanel";
+import { makeStoryView, saveStoryHandler, deleteStoryHandler } from "./skills/storyEditor";
 
 export const appRouter = new Hono();
 
@@ -204,6 +206,10 @@ appRouter.get("/rules", shellPage("rules", rulesPanelView));
 appRouter.get("/privacy", shellPage("privacy", privacyPanelView, (c) => pushUrl(c)));
 appRouter.get("/user", shellPage("user", userScreenView));
 appRouter.get("/skills", shellPage("skills", skillsView));
+appRouter.get("/stories", shellPage("stories", storiesView));
+appRouter.get("/make-story", shellPage("skills", makeStoryView));
+appRouter.post("/make-story/save", saveStoryHandler);
+appRouter.delete("/stories/:id", deleteStoryHandler);
 
 // ── Make Workflow wizard (full page) ─────────────────────────────────────────
 appRouter.get("/make-workflow", shellPage("make", makeWorkflowView));
@@ -330,9 +336,6 @@ appRouter.get("/api/model-picker", modelPickerHandler);
 
 // Key form — inline key entry inside the model picker modal
 appRouter.get("/api/key-form", keyFormHandler);
-
-// Skills preference — enable/disable skill groups (workspace-scoped).
-appRouter.post("/api/skills-save", skillsSaveHandler);
 
 // Navigation preference — show/hide shell nav sections from the /app/user screen
 appRouter.get("/api/nav-prefs", navPrefsCardHandler);

@@ -274,4 +274,43 @@ The v11 enforcement internals (`SelectedRule`, `classifyRule`,
 `composeRuleChecks`, `ruleParse`) intentionally keep the "rule" term — they model
 constraints (a skill's `## Rules` section), not the workspace-skill data type.
 
+## 11. Story → beat → skill → tool (stories as skill inclusion)
+
+Status: **done** (model, capability removal, beat-scoped routing, beat-driven plan) — story-wizard UX only.
+
+The meta-plan hierarchy is `story → beat → skill → tool`. The capability
+(skill-group) enable/disable layer is removed — a skill participates in a turn
+because a story's beat names it.
+
+- [x] `Beat.skills: string[]` (skill names) — `src/types/story.ts`; story markdown
+      backfilled (`src/core/stories/*.md`).
+- [x] Capability layer removed — `Skill.group`, `SKILL_GROUPS`, `skill_groups`
+      table, `enabled_skill_groups` metadata, `skillGroupsService`, the
+      enable/disable UI, and `enabledSkillNamesForDatabase` gating in every
+      orchestrator. Skills are flat; all tools are available.
+- [x] `catalog_beats.skills` (JSON) replaces `skill_name`; `materialize` /
+      `accessor` surface it (accessor drops `groups`/`enabledGroupIds`).
+- [x] User-authored stories — `.wfp stories[]` node, session accessors +
+      provenance, `misc.stories` persistence, `reconstruct.ts`, and
+      `loadAllStories(databaseId)` wired into `selectArchetype` + the accessor.
+- [x] Split Skills + Stories pages — `/app/skills` (flat skill → tool list,
+      tool pills, "New user skill") and `/app/stories` (Story | Beat | Skill
+      table). The "Rules" nav item is gone. Filters: skills page (skill, tool,
+      source); stories page (story, beat, skill, source).
+- [x] Beat-scoped routing — `route` now takes the selected story's beat skills as
+      the Jev universe (`skillUniverse`), and falls back to the `clarify` skill
+      when none fit (`skillRouter.ts` + `orchestrator.ts`).
+- [x] Thinking-panel drill-back — story/skill/rule chips link to
+      `/app/stories?story=` / `/app/skills?skill=`.
+- [x] Story authoring — `/app/make-story` form → `ws.upsertStory`.
+- [x] Beats drive the plan — the selected story's beat templates select the
+      deterministic recipe (`map`/`verdicts` → review battery, `report` → report
+      pipeline, `answer` → quick-fact), so a user-authored story reuses an
+      existing builder instead of a hardcoded story id. The `plan-shape`
+      classifier is gone for story requests; data files resolve via
+      `resolveDataNames` with a slim Jev fallback (`cascade.ts`).
+- [ ] Story-wizard UX — replace the beats-JSON textarea with a structured,
+      beat-by-beat editor (deferred).
+
+
 

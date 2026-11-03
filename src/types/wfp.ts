@@ -11,6 +11,7 @@ import type { SavedPrompt } from "./prompt";
 import type { EncryptionEnvelope } from "./encryption";
 import type { Rule } from "./rule";
 import type { Skill } from "./skill";
+import type { StoryArchetype } from "./story";
 import type { LLMLogEntry } from "./logs";
 import type { ProvenanceEvent } from "./provenance";
 import type { PrivacyMask } from "./privacy";
@@ -28,6 +29,9 @@ export interface WfpFile {
   skills?: Skill[];
   /** @deprecated legacy alias for `skills[]`; migrated to `skills[]` on open. */
   rules?: Rule[];
+  /** Workspace-authored stories (meta-plans) — layered over the server-shipped
+   *  stories; a workspace story with the same id wins. */
+  stories?: StoryArchetype[];
   sessions?: Session[];
   plan?: PlanEntry[];
   todos?: TodoEntry[];

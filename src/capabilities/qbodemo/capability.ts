@@ -10,9 +10,7 @@ const manifest: CapabilityManifest = {
   description: "Demo-only QuickBooks company (Acme Fund Services) with a fund-administrator chart of accounts and funds as classes. Reads and posts against an in-bundle dataset — never touches Intuit.",
   trust: "core",
   kind: "builtin",
-  group: { key: "qbodemo", label: "QBO Demo", defaultEnabled: false },
   prompt: "Build a budget vs actuals report for the demo fund-administrator company.",
-  skills: ["qbodemo-budgeting", "qbodemo-journaling"],
   dataAccess: { reads: ["plan_facts", "plan_dim"], writes: [] },
 };
 

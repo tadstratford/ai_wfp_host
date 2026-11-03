@@ -1,7 +1,11 @@
 /**
  * Story — the meta-plan type. A story is an ordered list of beats; each beat
- * names a skill (whose tools follow via `catalog_skill_tools`) plus a `template`
- * id that maps to a deterministic (or LLM-composed) plan builder.
+ * names one or more skills (whose tools follow via `catalog_skill_tools`) plus a
+ * `template` id that maps to a deterministic (or LLM-composed) plan builder.
+ *
+ * A beat references a skill by name only — the story is what "includes" a skill,
+ * so a skill participates in a turn because a beat names it. Workspace-authored
+ * skills are referenced the same way.
  *
  * These types are server-wide (used by the catalog and the chat orchestrator),
  * which is why they live here rather than under a specific chat version.
@@ -31,9 +35,9 @@ export type VerifyRule =
 export interface Beat {
   /** Stable beat id (unique within an archetype). */
   id: string;
-  /** The authoritative skill for this beat — its declared tools follow. Omit for
-   *  the `generic` catch-all beat, which uses all enabled skills. */
-  skill?: string;
+  /** The skills this beat may use — their declared tools follow. Empty/omitted =
+   *  the `generic` catch-all beat, which uses all skills. */
+  skills?: string[];
   /** The code template that assembles this beat's plan/artifact. */
   template: BeatTemplateId;
   /** Per-beat Jev verification criterion. */

@@ -31,6 +31,7 @@ const JSON_COLUMNS: Record<string, string[]> = {
   user_email_addresses: ["allowlisted_senders", "outbound_allowlist"],
   inbound_emails: ["entry"],
   catalog_skills: ["tags"],
+  catalog_beats: ["skills"],
 };
 
 // BOOLEAN columns → stored as INTEGER 0/1; hydrated back to booleans.
@@ -91,6 +92,12 @@ export function getDb(): Database {
   const siteVisitsCols = db.prepare(`PRAGMA table_info(site_visits)`).all() as { name: string }[];
   if (!siteVisitsCols.some((c) => c.name === "host")) {
     db.run(`ALTER TABLE site_visits ADD COLUMN host TEXT`);
+  }
+  // catalog_beats.skills replaced the old skill_name column — fold the rollout
+  // in so existing databases pick up the new column without a rebuild.
+  const beatCols = db.prepare(`PRAGMA table_info(catalog_beats)`).all() as { name: string }[];
+  if (!beatCols.some((c) => c.name === "skills")) {
+    db.run(`ALTER TABLE catalog_beats ADD COLUMN skills TEXT`);
   }
   return db;
 }

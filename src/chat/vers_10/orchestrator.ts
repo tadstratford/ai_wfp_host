@@ -29,7 +29,6 @@ import { getSessionByDatabaseId } from "@backend/core/workspace/workspaceSession
 import { setParameterValue, getParameterValue, getParameterMetaValue } from "@backend/core/settings/parameterHelpers";
 import { getSystemSkillNames } from "../vers_8/getSkillsPrompt";
 import { route } from "../vers_8/skillRouter";
-import { ensureEnabledSkillGroups } from "@backend/core/admin/skillGroupsService";
 import { verifyResult, verifyPlan } from "../vers_9/verify";
 import {
   runComposedPlan,
@@ -211,8 +210,6 @@ export async function processUserMessage(
     await vers9ProcessUserMessage(rawMessage, session, io);
     return;
   }
-
-  await ensureEnabledSkillGroups(io.databaseId);
 
   const decision = await route(io.databaseId, io.userId, rawMessage, {
     lastRequest: (session?.metadata as any)?.lastRequest,

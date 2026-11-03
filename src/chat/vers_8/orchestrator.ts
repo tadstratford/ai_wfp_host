@@ -19,7 +19,6 @@ import { getToolParams, type ToolParam } from "../extract/schema";
 import { extractParams } from "../extract/extract";
 import { getCapabilityIndex } from "@mcp/capabilityIndex";
 import { toolsForCapability, toolNamesWhere, isReportTool, listCapabilities } from "../../capabilities/registry";
-import { enabledSkillNamesForDatabase } from "../../core/skills/loader";
 import { runLoop, mcpToolsToProvider } from "./loop";
 import type { LoopResult } from "./loop";
 import { getPlanner, synthesizeStructuredArgs, resolveDataName } from "../plan";
@@ -28,7 +27,6 @@ import { llmPlanner } from "../plan/llm";
 import { buildClarifyQuestion, persistClarifiedParams } from "../plan/clarify";
 import { executePlanInSession } from "@backend/core/workflow";
 import { buildSystemPrompt } from "./prompts";
-import { ensureEnabledSkillGroups } from "@backend/core/admin/skillGroupsService";
 import type { MetaData } from "wfp-api";
 import type { AddMessageArgs } from "@backend/types/chat";
 
@@ -515,15 +513,11 @@ const PLANNING_WRITE_TOOLS = toolsForCapability("planning", ["constructive-write
  *  in this set, so they always remain available. This is the single gate that
  *  keeps a disabled capability's tools out of every prompt/loop/fast-path
  *  surface without dropping core tools. */
+/** No capability enable/disable — every tool is available. Kept as a function so
+ *  call sites are unchanged; always returns the empty set. */
 function disabledToolNames(databaseId: string): Set<string> {
-  const enabledSkills = enabledSkillNamesForDatabase(databaseId);
-  const out = new Set<string>();
-  for (const cap of listCapabilities()) {
-    const m = cap.manifest;
-    const enabled = !m.group || (m.skills ?? []).some((s) => enabledSkills.has(s));
-    if (!enabled) for (const t of cap.tools) out.add(t.name);
-  }
-  return out;
+  void databaseId;
+  return new Set<string>();
 }
 
 // Always-available tools — surfaced to the loop regardless of the active skills'
@@ -1027,8 +1021,6 @@ export async function processUserMessage(
 
   // ── Phase 1: Jev routing (skill + tool + gates) ─────────────────────
   // One batched structured-decision call classifies the whole request.
-  await ensureEnabledSkillGroups(io.databaseId);
-
   let decision: RouteDecision;
   try {
     decision = await route(io.databaseId, io.userId, rawMessage, {

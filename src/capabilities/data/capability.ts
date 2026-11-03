@@ -10,7 +10,6 @@ const manifest: CapabilityManifest = {
   description: "User data CRUD: upload, list, read, aggregate, delete data entries.",
   trust: "core",
   kind: "builtin",
-  skills: ["data-handling", "data-account-check"],
 };
 
 export const dataCapability: CapabilityModule = {

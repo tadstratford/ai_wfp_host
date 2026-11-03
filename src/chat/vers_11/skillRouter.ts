@@ -71,6 +71,10 @@ export interface RouteContext {
   activeSkills?: string[];
   sessionId?: string;
   mode?: string;
+  /** When set (from the selected story's beats), Jev only picks from these
+   *  skills — the story's beats are the skill universe. Omit for the full roster
+   *  (generic / unresolved story). */
+  skillUniverse?: string[];
 }
 
 export async function route(
@@ -79,7 +83,10 @@ export async function route(
   rawMessage: string,
   context?: RouteContext,
 ): Promise<RouteDecision> {
-  const skills = skillRoster(databaseId);
+  const universe = context?.skillUniverse;
+  const skills = skillRoster(databaseId).filter((s) =>
+    universe ? universe.includes(s.name) : true,
+  );
   const explicit = explicitMention(rawMessage, skills);
 
   const key = await getClassifierKey(userId);
@@ -235,6 +242,12 @@ export async function route(
   // proactively instead of relying on Jev's probability clearing the threshold.
   if (!explicit && looksLikeReview(rawMessage) && !selectedSkills.includes(REVIEW_SKILL)) {
     selectedSkills = [REVIEW_SKILL, ...selectedSkills].slice(0, loadConfig().routing.maxSkills + 1);
+  }
+
+  // None of the story's beat skills fit → fall back to the clarify skill so the
+  // assistant asks instead of dead-ending.
+  if (selectedSkills.length === 0) {
+    selectedSkills = ["clarify"];
   }
 
   const skillSummary = rankedSkills

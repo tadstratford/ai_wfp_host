@@ -38,11 +38,9 @@ import { getSystemSkillNames } from "../vers_8/getSkillsPrompt";
 import { route } from "../vers_8/skillRouter";
 import { getCapabilityIndex } from "@mcp/capabilityIndex";
 import { toolNamesWhere, listCapabilities } from "../../capabilities/registry";
-import { enabledSkillNamesForDatabase } from "../../core/skills/loader";
 import { runLoop, mcpToolsToProvider } from "../vers_8/loop";
 import type { LoopResult } from "../vers_8/loop";
 import { buildSystemPrompt } from "../vers_8/prompts";
-import { ensureEnabledSkillGroups } from "@backend/core/admin/skillGroupsService";
 import { verifyResult } from "./verify";
 import { cascadePlanner } from "../plan/cascade";
 import type { NodePlan } from "../plan";
@@ -117,15 +115,10 @@ function isContinuation(raw: string): boolean {
 /** Tools disabled for this database — a capability with a group is enabled only
  *  when one of its group's skills is on. Core (ungrouped) capabilities are
  *  always available. */
+/** No capability enable/disable — every tool is available. Always empty. */
 function disabledToolNames(databaseId: string): Set<string> {
-  const enabledSkills = enabledSkillNamesForDatabase(databaseId);
-  const out = new Set<string>();
-  for (const cap of listCapabilities()) {
-    const m = cap.manifest;
-    const enabled = !m.group || (m.skills ?? []).some((s) => enabledSkills.has(s));
-    if (!enabled) for (const t of cap.tools) out.add(t.name);
-  }
-  return out;
+  void databaseId;
+  return new Set<string>();
 }
 
 function extractTextContent(mcpResult: any): string {
@@ -1754,8 +1747,6 @@ export async function processUserMessage(
     await updateSession(io.databaseId, io.sessionId, "metadata", { ...meta, pendingVerify: undefined });
     delete meta.pendingVerify;
   }
-
-  await ensureEnabledSkillGroups(io.databaseId);
 
   // ── Jev routing (skill → tools) ─────────────────────────────────────────
   const decision = await route(io.databaseId, io.userId, rawMessage, {

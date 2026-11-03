@@ -10,9 +10,7 @@ const manifest: CapabilityManifest = {
   description: "Lean budget-vs-actual store at reporting-account grain.",
   trust: "core",
   kind: "builtin",
-  group: { key: "budgeting", label: "Budgeting", defaultEnabled: false },
   prompt: "Build a budget vs actuals variance report for this fiscal year.",
-  skills: ["budgeting"],
 };
 
 export const planningCapability: CapabilityModule = {

@@ -76,12 +76,8 @@ export interface CapabilityManifest {
   description: string;
   trust: CapabilityTrust;
   kind: CapabilityKind;
-  /** Enablement group (maps to skillGroups). */
-  group?: { key: string; label: string; defaultEnabled: boolean };
   /** One-click chat capability chip (maps to chatCapabilities). */
   prompt?: string;
-  /** App skill names this capability owns (co-located under `skills/`). */
-  skills?: string[];
   auth?: CapabilityAuth;
   /** WFP data sections the capability reads/writes (curation-reviewable). */
   dataAccess?: { reads: string[]; writes: string[] };

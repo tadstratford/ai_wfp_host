@@ -1,32 +1,20 @@
 /**
- * materializeCatalog — build the server-wide catalog (skill groups, skills,
- * tools, skill→tool links) from the markdown skill files + capability registry
- * and upsert it into SQLite.
+ * materializeCatalog — build the server-wide catalog (skills, tools, skill→tool
+ * links) from the markdown skill files + capability registry and upsert it into
+ * SQLite.
  *
  * The markdown + registry remain the source of truth; SQLite is a derived,
- * queryable snapshot rebuilt (idempotently) at startup. Workspace rules are NOT
- * here — they are workspace data merged at read time by the accessor.
+ * queryable snapshot rebuilt (idempotently) at startup. Workspace skills are
+ * NOT here — they are workspace data merged at read time by the accessor.
  */
 
-import { SKILL_GROUPS } from "@shared/skillGroups";
 import { loadAppSkills, declaredTools } from "@core/skills/loader";
 import { loadStories } from "../core/stories/loader";
 import { listCapabilities } from "@capabilities/registry";
 import { upsert } from "@backend/core/admin/supabase";
 
 export async function materializeCatalog(): Promise<void> {
-  // 1) Skill groups — the canonical id/label/description set.
-  const groups = SKILL_GROUPS.map((g, i) => ({
-    id: g.key,
-    label: g.label,
-    description: g.description,
-    always_on: g.alwaysOn === true,
-    default_on: g.defaultEnabled === true,
-    sort_order: i,
-  }));
-  await upsert("skill_groups", groups);
-
-  // 2) Skills — name, description, scope, tags, content, group (frontmatter).
+  // 1) Skills — name, description, scope, tags, content (frontmatter).
   const skills = loadAppSkills();
   if (skills.length > 0) {
     await upsert(
@@ -36,13 +24,12 @@ export async function materializeCatalog(): Promise<void> {
         description: s.description ?? null,
         scope: s.scope ?? null,
         tags: s.tags ?? [],
-        group_id: s.group ?? null,
         content: s.content,
       })),
     );
   }
 
-  // 3) Tools — every capability tool (name, description, class, capability key).
+  // 2) Tools — every capability tool (name, description, class, capability key).
   const toolRows: Record<string, unknown>[] = [];
   for (const cap of listCapabilities()) {
     for (const t of cap.tools) {
@@ -56,7 +43,7 @@ export async function materializeCatalog(): Promise<void> {
   }
   if (toolRows.length > 0) await upsert("catalog_tools", toolRows);
 
-  // 4) Skill→tool links (with the skill's `role` note when declared).
+  // 3) Skill→tool links (with the skill's `role` note when declared).
   const skillToolRows: Record<string, unknown>[] = [];
   for (const s of skills) {
     if (s.tools && s.tools.length > 0) {
@@ -71,7 +58,7 @@ export async function materializeCatalog(): Promise<void> {
   }
   if (skillToolRows.length > 0) await upsert("catalog_skill_tools", skillToolRows);
 
-  // 5) Stories — server-wide story (meta-plan) + beat catalog from story
+  // 4) Stories — server-wide story (meta-plan) + beat catalog from story
   //    markdown. Best-effort: a malformed story is logged, not fatal, so a
   //    typo in app-shipped markdown can't crash startup.
   try {
@@ -92,7 +79,7 @@ export async function materializeCatalog(): Promise<void> {
             story_name: s.id,
             beat_id: b.id,
             sort_order: i,
-            skill_name: b.skill ?? null,
+            skills: b.skills ?? [],
             template: b.template,
             verify: b.verify,
             write: b.write ? 1 : 0,

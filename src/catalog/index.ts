@@ -1,8 +1,9 @@
 export { materializeCatalog } from "./materialize";
 export { getCatalogForWorkspace } from "./accessor";
 export type {
-  CatalogGroup,
   CatalogSkill,
   CatalogTool,
+  CatalogStory,
+  CatalogBeat,
   CatalogWorkspace,
 } from "./accessor";

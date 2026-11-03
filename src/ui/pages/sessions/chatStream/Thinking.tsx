@@ -69,6 +69,21 @@ function code(s: string) {
   return <code style={`font-size:12px;color:${BRAND}`}>{s}</code>;
 }
 
+/** A drill-back link from a thinking chip to the Skills page (filtered). */
+function drill(text: string, href: string) {
+  return (
+    <a
+      hx-get={href}
+      hx-target="#main-panel"
+      hx-swap="innerHTML"
+      hx-push-url="true"
+      style={`font-size:12px;color:${BRAND};text-decoration:underline;cursor:pointer`}
+    >
+      {text}
+    </a>
+  );
+}
+
 function header(prompt: string) {
   return (
     <div style={`padding:10px 14px;display:flex;align-items:center;gap:8px;border-bottom:1px solid ${BORDER}`}>
@@ -159,7 +174,7 @@ export function Thinking({ json }: { json: any }) {
         Picked: {chosen.map((s: string, i: number) => (
           <span key={i}>
             {i > 0 ? ", " : ""}
-            {code(s)}
+            {drill(s, `/app/skills?skill=${encodeURIComponent(s)}`)}
           </span>
         ))}
       </span>,
@@ -170,7 +185,7 @@ export function Thinking({ json }: { json: any }) {
     const story = typeof json?.story === "string" ? json.story : null;
     return compact(
       <span>
-        Story: {story ? code(story) : <span style={`font-size:13px;color:${MUTED}`}>none</span>}
+        Story: {story ? drill(story, `/app/stories?story=${encodeURIComponent(story)}`) : <span style={`font-size:13px;color:${MUTED}`}>none</span>}
       </span>,
     );
   }
@@ -185,7 +200,7 @@ export function Thinking({ json }: { json: any }) {
         Rules applying: {rules.map((r, i) => (
           <span key={i}>
             {i > 0 ? ", " : ""}
-            {code(r.name)}
+            {drill(r.name, `/app/skills?skill=${encodeURIComponent(r.name)}`)}
             <span style={`font-size:12px;color:${MUTED}`}> ({r.tier})</span>
           </span>
         ))}

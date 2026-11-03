@@ -27,7 +27,6 @@ import { z } from "zod";
 import { callStructured } from "@backend/core/llm/structured";
 import { getSessionByDatabaseId } from "@backend/core/workspace/workspaceSessionStore";
 import { listCapabilities } from "@capabilities/registry";
-import { enabledSkillNamesForDatabase } from "@core/skills/loader";
 import { loadPrivacyMap } from "@backend/core/knowledge/index";
 import { maskText, discoverRequestValues } from "@backend/core/knowledge/autoMask";
 import { loadWorkspaceSkills } from "@rules/loader";
@@ -334,14 +333,11 @@ function defaultCutoverFor(fy: number): number {
   return Math.min(m, 12);
 }
 
-/** The enabled cash-balance feed tool for this workspace — capability-driven so
- *  it works regardless of which skill Jev routed (budgeting vs qbodemo-budgeting). */
+/** The enabled cash-balance feed tool for this workspace — first available
+ *  (demo before live) since there is no capability enable/disable anymore. */
 function cashFeedTool(databaseId: string): string | null {
-  const enabledSkills = enabledSkillNamesForDatabase(databaseId);
+  void databaseId;
   for (const cap of listCapabilities()) {
-    const m = cap.manifest;
-    const enabled = !m.group || (m.skills ?? []).some((s) => enabledSkills.has(s));
-    if (!enabled) continue;
     const names = new Set(cap.tools.map((t) => t.name));
     if (names.has("qbodemo_cash_balances")) return "qbodemo_cash_balances";
     if (names.has("qbo_cash_balances")) return "qbo_cash_balances";

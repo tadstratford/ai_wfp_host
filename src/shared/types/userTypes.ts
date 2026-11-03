@@ -18,7 +18,6 @@ export interface User {
     currentChatMode: string;     // 'plan' | 'build' — persisted chat mode
     chatVerbose: boolean;        // show process details (LLM/tool/meta) in chat stream
     creditBalanceUsd?: number;   // total credit granted via beta codes
-    skillsEnabled?: string[];    // enabled skill group keys (see @shared/skillGroups)
     navVisible?: string[];       // visible nav section keys (see @shared/navItems)
     createdAt?: Date | string;
 

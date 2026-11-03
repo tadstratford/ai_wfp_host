@@ -1,7 +1,6 @@
 import { select, selectOne, insert, update, del, rpc } from "./supabase";
 import { encrypt, decrypt } from "@backend/core/crypto";
 import type { User } from "@backend/types";
-import { normalizeGroupKeys } from "@shared/skillGroups";
 import { normalizeNavKeys } from "@shared/navItems";
 import {
   parseSecretsBlob,
@@ -30,7 +29,7 @@ const USER_COLUMNS = [
     "database_id", "workspace_name", "dark_mode", "encrypted_llm_api_key", "encrypted_secrets",
     "llm_provider", "llm_model", "current_session_id", "current_workflow_id", "current_chat_mode", "chat_verbose",
     "persona_markdown", "last_login", "created_at", "credit_balance_usd",
-    "skills_enabled", "nav_enabled"
+    "nav_enabled"
 ].join(",");
 
 /**
@@ -377,36 +376,6 @@ export const userManager = {
         });
     },
 
-    /** Get the enabled skill group keys for a user (normalized, or [] if unset). */
-    getSkillGroups: async (userId: string): Promise<string[]> => {
-        const { data, error } = await selectOne("admin_users", { user_id: userId }, "skills_enabled");
-        if (error || !data) return [];
-        return parseEnabledSkillGroups(data.skills_enabled) ?? [];
-    },
-
-    /** Get the enabled skill group keys by database_id (for the tool runtime). */
-    getSkillGroupsByDatabaseId: async (databaseId: string): Promise<string[]> => {
-        const { data, error } = await selectOne("admin_users", { database_id: databaseId }, "skills_enabled");
-        if (error || !data) return [];
-        return parseEnabledSkillGroups(data.skills_enabled) ?? [];
-    },
-
-    /** Raw stored skill group keys by database_id — null when no preference is saved. */
-    getStoredSkillGroupsByDatabaseId: async (databaseId: string): Promise<string[] | null> => {
-        const { data, error } = await selectOne("admin_users", { database_id: databaseId }, "skills_enabled");
-        if (error || !data || !data.skills_enabled) return null;
-        return parseEnabledSkillGroups(data.skills_enabled) ?? [];
-    },
-
-    /** Persist the user's enabled skill group keys (normalized, deduped). */
-    saveSkillGroups: async (userId: string, groupKeys: string[]): Promise<void> => {
-        const keys = normalizeGroupKeys(groupKeys);
-        const { error } = await update("admin_users", { user_id: userId }, {
-            skills_enabled: keys.length > 0 ? JSON.stringify(keys) : null,
-        });
-        if (error) console.error("[userManager] saveSkillGroups:", error);
-    },
-
     /** Get the user's visible nav section keys (normalized, or [] if unset). */
     getNavVisibility: async (userId: string): Promise<string[]> => {
         const { data, error } = await selectOne("admin_users", { user_id: userId }, "nav_enabled");
@@ -583,28 +552,9 @@ function mapDbUserToDomain(row: any): User {
         currentChatMode: row.current_chat_mode || "build",
         chatVerbose: row.chat_verbose !== 0,
         creditBalanceUsd: typeof row.credit_balance_usd === "number" ? row.credit_balance_usd : 0,
-        skillsEnabled: parseEnabledSkillGroups(row.skills_enabled),
         navVisible: parseNavVisibility(row.nav_enabled),
         createdAt: row.created_at,
     };
-}
-
-/** Parse the stored skills_enabled column (JSON array or comma list) → group keys. */
-function parseEnabledSkillGroups(raw: string | null | undefined): string[] | undefined {
-    if (!raw) return undefined;
-    try {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
-            const keys = normalizeGroupKeys(parsed);
-            return keys.length > 0 ? keys : undefined;
-        }
-    } catch {
-        // fall through to comma-list parsing
-    }
-    const keys = normalizeGroupKeys(
-        raw.split(",").map((s) => s.trim()).filter(Boolean),
-    );
-    return keys.length > 0 ? keys : undefined;
 }
 
 /** Parse the stored nav_enabled column (JSON array or comma list) → nav keys. */

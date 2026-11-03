@@ -12,8 +12,16 @@ The document has two halves: the **work product** (content) and the **record**
 | `tools[]` | Tool definitions the workflows reference |
 | `data{}` | The books and working papers — named data entries || `knowledge[]` | Reference packs the workflows and chat consult |
 | `skills[]` | User-authored skills and guardrails (formerly `rules[]`) |
+| `stories[]` **(new)** | Workspace-authored stories (meta-plans) — ordered beats; layered over the server-shipped stories (same id wins) |
 | `sessions[]` | The record of chat and automation runs |
 | `plan[]`, `todos[]`, `saved_prompts[]` | Working state: plans, task lists, saved prompts |
+
+### The story → beat → skill → tool hierarchy
+
+A story is an ordered list of beats; each beat names the skills it uses (by
+name), whose tools follow. A skill participates in a turn because a beat names
+it — the story is how skills are "included" or "excluded". Workspace-authored
+skills are referenced the same way.
 
 ### `data{}` source workbooks
 

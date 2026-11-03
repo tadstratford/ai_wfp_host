@@ -1,6 +1,5 @@
 import { getSessionByDatabaseId } from "@backend/core/workspace/workspaceSessionStore";
 import { userManager } from "@backend/core/admin/userManager";
-import { ensureEnabledSkillGroups } from "@backend/core/admin/skillGroupsService";
 import { getToolsList } from "@core/tools/registry";
 import { loadAllSkills } from "../../core/skills/loader";
 import { loadWorkspaceSkills } from "../../rules/loader";
@@ -163,11 +162,9 @@ export async function buildManifest(
       .map((p) => ({ name: p.name, scope: p.scope, tags: p.tags ?? [] }));
   }
 
-  // Skills — app skills (shipped with code), scoped to the database's enabled
-  // groups so the LLM only sees skills the user has switched on.
+  // Skills — app skills (shipped with code).
   let skills: SkillSummary[] = [];
   try {
-    await ensureEnabledSkillGroups(databaseId);
     skills = loadAllSkills(undefined, databaseId).map((s) => ({
       name: s.name,
       scope: s.scope,

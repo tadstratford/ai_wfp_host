@@ -18,9 +18,6 @@ export interface Skill {
   description?: string;
   scope?: SkillScope;
   tags?: string[];
-  /** Canonical skill-group id (capability) this skill belongs to — the single
-   *  source of truth for enablement. References `skill_groups.id`. */
-  group?: string;
   /** App-shipped vs workspace-authored. Absent on legacy records (treated as
    *  `workspace` when stored under the `.wfp` rules/skills node). */
   source?: SkillSource;

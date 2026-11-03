@@ -70,6 +70,7 @@ const COL_FOR: Record<SectionCol, string> = {
 function splitWfp(wfp: WfpFile): SectionPayload {
   const misc: Record<string, unknown> = {};
   if (wfp.skills !== undefined) misc.skills = wfp.skills;
+  if (wfp.stories !== undefined) misc.stories = wfp.stories;
   if (wfp.plan !== undefined) misc.plan = wfp.plan;
   if (wfp.todos !== undefined) misc.todos = wfp.todos;
   if (wfp.saved_prompts !== undefined) misc.saved_prompts = wfp.saved_prompts;
@@ -107,6 +108,7 @@ function joinWfp(payload: SectionPayload): WfpFile {
     const misc = JSON.parse(payload.misc) as Record<string, unknown>;
     if (misc.skills !== undefined) wfp.skills = misc.skills as WfpFile["skills"];
     else if (misc.rules !== undefined) wfp.skills = misc.rules as WfpFile["skills"];
+    if (misc.stories !== undefined) wfp.stories = misc.stories as WfpFile["stories"];
     if (misc.plan !== undefined) wfp.plan = misc.plan as WfpFile["plan"];
     if (misc.todos !== undefined) wfp.todos = misc.todos as WfpFile["todos"];
     if (misc.saved_prompts !== undefined) wfp.saved_prompts = misc.saved_prompts as WfpFile["saved_prompts"];

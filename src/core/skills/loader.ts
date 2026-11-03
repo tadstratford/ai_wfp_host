@@ -4,56 +4,17 @@
  * Skills are markdown files with frontmatter, shipped read-only with the code.
  * They live in two places: core skills in this directory (`src/core/skills/`)
  * and capability-owned skills under `src/capabilities/<name>/skills/`. The
- * loader scans both. Workspace-authored rules live in the .wfp document under
- * `wfp.rules[]` (see src/rules/loader.ts).
+ * loader scans both. Workspace-authored skills live in the .wfp document under
+ * `wfp.skills[]` (see src/rules/loader.ts). Skills are flat — a story's beats
+ * decide which ones apply to a request.
  */
 
 import * as fs from "fs";
 import * as path from "path";
 import type { Skill, SkillScope } from "wfp-format/skill";
-import {
-  ALWAYS_ON_GROUP_KEYS,
-  DEFAULT_SKILL_GROUP_KEYS,
-} from "@shared/skillGroups";
 
 export interface SkillWithSource extends Skill {
   source: "app";
-}
-
-/**
- * Per-database enabled skill group keys. Populated by the host before chat or
- * workflow runs resolve skills (see skillPrefs service). An absent entry means
- * "no preference stored yet" → DEFAULT_SKILL_GROUP_KEYS applies.
- */
-const enabledGroupsByDatabase = new Map<string, string[]>();
-
-/** Record the enabled skill group keys for a database (persisted preference). */
-export function setEnabledGroupsForDatabase(
-  databaseId: string,
-  groupKeys: string[],
-): void {
-  enabledGroupsByDatabase.set(databaseId, groupKeys);
-}
-
-/** The concrete group keys a database may use, always-on core always included. */
-export function enabledGroupKeysForDatabase(databaseId?: string): Set<string> {
-  const stored = databaseId
-    ? enabledGroupsByDatabase.get(databaseId)
-    : undefined;
-  const keys = new Set<string>(ALWAYS_ON_GROUP_KEYS);
-  for (const k of stored ?? DEFAULT_SKILL_GROUP_KEYS) keys.add(k);
-  return keys;
-}
-
-/** The concrete skill names a database may use, derived from each skill's
- *  frontmatter `group` against the effective enabled group keys. */
-export function enabledSkillNamesForDatabase(databaseId?: string): Set<string> {
-  const keys = enabledGroupKeysForDatabase(databaseId);
-  return new Set(
-    loadAppSkills()
-      .filter((s) => !s.group || keys.has(s.group))
-      .map((s) => s.name),
-  );
 }
 
 /** Directories that hold skill markdown: core skills + every capability's
@@ -75,13 +36,10 @@ function skillDirectories(): string[] {
 
 /**
  * Load all app skills from the skill markdown directories.
- * Parses simple YAML frontmatter (name, scope, tags).
- *
- * @param databaseId - when given, the loaded skills are filtered to the
- *   database's enabled skill groups (defaults when no preference is cached).
- *   Omit for administration views that should list every app skill.
+ * Parses simple YAML frontmatter (name, scope, tags, tools).
  */
 export function loadAppSkills(databaseId?: string): SkillWithSource[] {
+  void databaseId;
   const skills: SkillWithSource[] = [];
 
   for (const skillsDir of skillDirectories()) {
@@ -101,7 +59,6 @@ export function loadAppSkills(databaseId?: string): SkillWithSource[] {
           description: parsed.description,
           scope: (parsed.scope as SkillScope) || undefined,
           tags: parsed.tags || [],
-          group: parsed.group,
           content: parsed.content,
           tools: parsed.tools,
           source: "app",
@@ -112,12 +69,7 @@ export function loadAppSkills(databaseId?: string): SkillWithSource[] {
     }
   }
 
-  const enabledGroups = databaseId ? enabledGroupKeysForDatabase(databaseId) : null;
-
-  return skills.filter((s) => {
-    if (enabledGroups && s.group && !enabledGroups.has(s.group)) return false;
-    return true;
-  });
+  return skills;
 }
 
 /** Extract the tool names declared in a skill's `## Tools needed` section. Used
@@ -156,7 +108,6 @@ function parseFrontmatter(raw: string): {
   description?: string;
   scope?: string;
   tags?: string[];
-  group?: string;
   tools?: { name: string; role?: string }[];
   content: string;
 } {
@@ -195,7 +146,6 @@ function parseFrontmatter(raw: string): {
     description: result.description,
     scope: result.scope,
     tags: result.tags,
-    group: result.group,
     tools: parseTools(result.tools),
     content,
   };

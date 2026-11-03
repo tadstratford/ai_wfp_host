@@ -13,7 +13,6 @@
 import { getPlanner } from "./plan/planner";
 import type { PlanRequest, PlanResult } from "./plan/planner";
 import { getToolClass, isDurableTool, isMutatingTool, listCapabilities } from "../../capabilities/registry";
-import { enabledSkillNamesForDatabase } from "../../core/skills/loader";
 import { getCapabilityIndex } from "@mcp/capabilityIndex";
 import { COMPOSABLE_PRIMITIVES } from "./plan/primitives";
 import { withTimeout } from "./util";
@@ -22,15 +21,10 @@ import type { ClassifiedRule, DataStep, Step, TurnPlan } from "./types";
 
 const ROUTING_TOOLS = new Set(["select_skill", "list_skills"]);
 
+/** No capability enable/disable — every tool is available. Always empty. */
 function disabledToolNames(databaseId: string): Set<string> {
-  const enabledSkills = enabledSkillNamesForDatabase(databaseId);
-  const out = new Set<string>();
-  for (const cap of listCapabilities()) {
-    const m = cap.manifest;
-    const enabled = !m.group || (m.skills ?? []).some((s) => enabledSkills.has(s));
-    if (!enabled) for (const t of cap.tools) out.add(t.name);
-  }
-  return out;
+  void databaseId;
+  return new Set<string>();
 }
 
 async function buildToolRoster(

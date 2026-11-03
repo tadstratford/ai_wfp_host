@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { loadAppSkills, declaredTools, enabledSkillNamesForDatabase } from "./loader";
+import { loadAppSkills, declaredTools } from "./loader";
 
 describe("loadAppSkills", () => {
   it("parses structured tools from skill frontmatter", () => {
@@ -17,20 +17,13 @@ describe("loadAppSkills", () => {
     expect(declaredTools(legacy)).toEqual(["qbodemo_allocation_compute", "qbodemo_journal_create"]);
   });
 
-  it("derives each skill's group from frontmatter (single source of truth)", () => {
+  it("loads all app skills without group filtering", () => {
     const skills = loadAppSkills();
-    expect(skills.find((s) => s.name === "report-authoring")?.group).toBe("core");
-    expect(skills.find((s) => s.name === "qbodemo-journaling")?.group).toBe("qbodemo");
-    expect(skills.find((s) => s.name === "budgeting")?.group).toBe("budgeting");
-    expect(skills.find((s) => s.name === "email-outbound")?.group).toBe("email-outbound");
-  });
-
-  it("filters skills by enabled group (defaults = always-on only)", () => {
-    const enabled = enabledSkillNamesForDatabase("unmapped-db");
-    expect(enabled.has("report-authoring")).toBe(true);
-    expect(enabled.has("data-account-check")).toBe(true);
-    expect(enabled.has("qbo-analysis")).toBe(false);
-    expect(enabled.has("qbodemo-budgeting")).toBe(false);
-    expect(enabled.has("email-outbound")).toBe(false);
+    const names = new Set(skills.map((s) => s.name));
+    expect(names.has("report-authoring")).toBe(true);
+    expect(names.has("data-account-check")).toBe(true);
+    expect(names.has("qbo-analysis")).toBe(true);
+    expect(names.has("qbodemo-budgeting")).toBe(true);
+    expect(names.has("email-outbound")).toBe(true);
   });
 });

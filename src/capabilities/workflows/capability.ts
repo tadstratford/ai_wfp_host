@@ -10,7 +10,6 @@ const manifest: CapabilityManifest = {
   description: "Workflow CRUD and execution operations.",
   trust: "core",
   kind: "builtin",
-  skills: ["workflow-build"],
 };
 
 export const workflowsCapability: CapabilityModule = {

@@ -6,8 +6,8 @@
  * above the configured threshold. Selection only — running the story's beats is
  * a later phase; here the result is recorded in the plan's provenance.
  *
- * Stories come from the markdown catalog (`src/core/stories/*.md`), loaded via
- * `loadStories()`. Mirrors the `SHAPES` classifier and skill routing: state is
+ * Stories come from the server catalog + the workspace's own stories, loaded
+ * via `loadAllStories(databaseId)`. Mirrors the `SHAPES` classifier and skill routing: state is
  * privacy-masked, the call is logged via `logAndFireJev`, and no archetype
  * clearing the threshold yields `null` (current single-shot behavior).
  */
@@ -19,7 +19,7 @@ import { loadPrivacyMap } from "@backend/core/knowledge/index";
 import { maskText, discoverRequestValues } from "@backend/core/knowledge/autoMask";
 import { logAndFireJev } from "../../jevLog";
 import { loadConfig } from "../config";
-import { loadStories } from "../../../core/stories/loader";
+import { loadAllStories } from "../../../core/stories/workspace";
 import type { StoryArchetype } from "wfp-format/story";
 
 export interface RankedArchetype {
@@ -43,7 +43,7 @@ export async function selectArchetype(
   rawMessage: string,
   opts: { sessionId?: string; mode?: string },
 ): Promise<StoryDecision> {
-  const stories = loadStories();
+  const stories = loadAllStories(databaseId);
   if (stories.length === 0) {
     return { archetype: null, options: [], summary: "" };
   }

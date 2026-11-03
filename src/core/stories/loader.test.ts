@@ -30,15 +30,17 @@ describe("story loader", () => {
   it("the generic catch-all has a clarify beat and a skill-less resolve beat", () => {
     const g = loadStories().find((s) => s.id === "generic")!;
     expect(g.beats[0].id).toBe("clarify");
-    expect(g.beats[0].skill).toBe("clarify");
-    expect(g.beats[1].skill).toBeUndefined();
+    expect(g.beats[0].skills).toEqual(["clarify"]);
+    expect(g.beats[1].skills).toBeUndefined();
   });
 
-  it("beats reference skills only (no tool list), and every story has nouls", () => {
+  it("beats reference skills by name (no tool list), and every story has nouls", () => {
     for (const s of loadStories()) {
       expect(Object.keys(s.nouls).length).toBeGreaterThan(0);
       for (const b of s.beats) {
-        expect(b.skill === undefined || typeof b.skill === "string").toBe(true);
+        for (const name of b.skills ?? []) {
+          expect(typeof name).toBe("string");
+        }
         expect(b.template).toBeTruthy();
         expect(b.verify).toBeTruthy();
       }

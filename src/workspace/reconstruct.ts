@@ -56,6 +56,7 @@ export async function reconstructWfp(
   const tools: unknown[] = [];
   const knowledge: unknown[] = [];
   const skills: unknown[] = [];
+  const stories: unknown[] = [];
   const sessions: unknown[] = [];
   const logs: unknown[] = [];
 
@@ -76,6 +77,7 @@ export async function reconstructWfp(
       case "tool": tools.push(value); break;
       case "knowledge": knowledge.push(value); break;
       case "rule": skills.push(value); break;
+      case "story": stories.push(value); break;
       case "session": sessions.push(value); break;
       case "log": logs.push(value); break;
       case "plan": wfp.plan = value as WfpFile["plan"]; break;
@@ -91,6 +93,7 @@ export async function reconstructWfp(
   if (tools.length) wfp.tools = tools as WfpFile["tools"];
   if (knowledge.length) wfp.knowledge = knowledge as WfpFile["knowledge"];
   if (skills.length) wfp.skills = skills as WfpFile["skills"];
+  if (stories.length) wfp.stories = stories as WfpFile["stories"];
   if (sessions.length) wfp.sessions = sessions as WfpFile["sessions"];
   if (logs.length) wfp.logs = logs as WfpFile["logs"];
 

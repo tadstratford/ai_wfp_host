@@ -34,7 +34,7 @@ const CLIENT_NAV: NavItem[] = [
   { key: "chat", label: "Chat", href: "/app/chat", iconSvg: CHAT_ICON },
   { key: "overview", label: "Workflows", href: "/app/overview", iconSvg: HOME_ICON },
   { key: "privacy", label: "Privacy Map", href: "/app/privacy", iconSvg: PRIVACY_ICON },
-  { key: "rules", label: "Rules", href: "/app/rules", iconSvg: SKILLS_ICON },
+  { key: "stories", label: "Stories", href: "/app/stories", iconSvg: SKILLS_ICON },
   { key: "skills", label: "Skills", href: "/app/skills", iconSvg: CAPS_ICON },
   { key: "data", label: "Data", href: "/app/data", iconSvg: DATA_ICON },
   { key: "timemachine", label: "Time Machine", href: "/app/timemachine", iconSvg: TIME_MACHINE_ICON },

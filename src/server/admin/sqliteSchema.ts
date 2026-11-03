@@ -331,14 +331,15 @@ CREATE TABLE IF NOT EXISTS catalog_stories (
   nouls       TEXT
 );
 
--- catalog_beats — the ordered beats each story walks. skill_name is the
--- authoritative skill (tools follow via catalog_skill_tools); NULL = all skills
--- (the generic catch-all). template is a stable id mapping to a code builder.
+-- catalog_beats — the ordered beats each story walks. skills is a JSON string
+-- of [{ skill_group, skill }] references (tools follow via catalog_skill_tools);
+-- empty = all skills (the generic catch-all). template is a stable id mapping to
+-- a code builder.
 CREATE TABLE IF NOT EXISTS catalog_beats (
   story_name  TEXT NOT NULL,
   beat_id     TEXT NOT NULL,
   sort_order  INTEGER DEFAULT 0,
-  skill_name  TEXT,
+  skills      TEXT,
   template    TEXT,
   verify      TEXT,
   write       INTEGER DEFAULT 0,

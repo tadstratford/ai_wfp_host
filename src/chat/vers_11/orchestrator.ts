@@ -21,7 +21,6 @@ import { getSession, updateSession, saveSession } from "@backend/core/session/se
 import { setParameterValue, getParameterValue, getParameterMetaValue } from "@backend/core/settings/parameterHelpers";
 import { getSystemSkillNames } from "./getSkillsPrompt";
 import { route } from "./skillRouter";
-import { ensureEnabledSkillGroups } from "@backend/core/admin/skillGroupsService";
 import type { OrchestratorIO } from "./types";
 import { selectRules } from "./select";
 import { classifyRule } from "./classifyRule";
@@ -138,8 +137,6 @@ export async function processUserMessage(
     await updateSession(io.databaseId, io.sessionId, "metadata", { ...meta, plan: undefined });
   }
 
-  await ensureEnabledSkillGroups(io.databaseId);
-
   // ── Story (meta-plan) selection ──────────────────────────────────────────
   // Jev picks the story archetype (audit-review vs quick-fact) FIRST — it is the
   // meta-plan, so it is decided before skills/tools. Selection only for now: the
@@ -172,11 +169,19 @@ export async function processUserMessage(
   }
 
   // ── Skill routing ─────────────────────────────────────────────────────────
+  // The story's beats are the skill universe Jev picks from (generic / no story
+  // falls back to the full roster).
+  const beatSkillUniverse =
+    story.archetype && story.archetype.id !== "generic"
+      ? Array.from(new Set(story.archetype.beats.flatMap((b) => b.skills ?? [])))
+      : undefined;
+
   const decision = await route(io.databaseId, io.userId, rawMessage, {
     lastRequest: meta.lastRequest,
     activeSkills: meta.lastActiveSkills,
     sessionId: io.sessionId,
     mode: io.mode,
+    skillUniverse: beatSkillUniverse,
   });
 
   const allSkillNames = getSystemSkillNames(io.databaseId);

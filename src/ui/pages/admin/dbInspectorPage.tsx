@@ -21,7 +21,10 @@ export function DbInspectorPage({ tables, path }: { tables: TableInfo[]; path: s
               <h1 class="text-xl font-bold tracking-tight text-ink">Database Inspector</h1>
               <p class="text-sm text-ink-500 mt-1 font-mono">{path}</p>
             </div>
-            <a href="/app" class="text-sm font-semibold text-brand-600 hover:text-brand-700 no-underline">← Back to app</a>
+            <div class="flex items-center gap-4 text-sm font-semibold">
+              <a href="/admin/users" class="text-ink-500 hover:text-ink-700 no-underline">Users</a>
+              <a href="/app" class="text-brand-600 hover:text-brand-700 no-underline">← Back to app</a>
+            </div>
           </div>
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-6">

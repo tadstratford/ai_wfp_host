@@ -1,7 +1,6 @@
 import { loadAllSkills } from "@core/skills/loader";
 import { loadWorkspaceSkills } from "@rules/loader";
 import type { Skill } from "wfp-format/skill";
-import { ensureEnabledSkillGroups } from "@backend/core/admin/skillGroupsService";
 import { getSessionByDatabaseId } from "@backend/core/workspace/workspaceSessionStore";
 
 let currentDatabaseId: string | null = null;
@@ -15,7 +14,7 @@ export function getDatabaseId(): string | null {
 }
 
 export async function ensureEnabled(): Promise<void> {
-  if (currentDatabaseId) await ensureEnabledSkillGroups(currentDatabaseId);
+  void currentDatabaseId;
 }
 
 export function normalizeName(name: string): string {

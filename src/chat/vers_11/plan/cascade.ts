@@ -27,10 +27,11 @@ import { z } from "zod";
 import { callStructured } from "@backend/core/llm/structured";
 import { getSessionByDatabaseId } from "@backend/core/workspace/workspaceSessionStore";
 import { listCapabilities } from "@capabilities/registry";
-import { enabledSkillNamesForDatabase } from "@core/skills/loader";
 import { loadPrivacyMap } from "@backend/core/knowledge/index";
 import { maskText, discoverRequestValues } from "@backend/core/knowledge/autoMask";
 import { loadWorkspaceSkills } from "@rules/loader";
+import { loadAllStories } from "../../../core/stories/workspace";
+import type { Beat } from "wfp-format/story";
 import { ruleBriefLines } from "../../context/workspace";
 import { FilterClauseSchema, type FilterClause } from "@data/filter";
 import { resolveDataNames } from "./args";
@@ -335,14 +336,11 @@ function defaultCutoverFor(fy: number): number {
   return Math.min(m, 12);
 }
 
-/** The enabled cash-balance feed tool for this workspace — capability-driven so
- *  it works regardless of which skill Jev routed (budgeting vs qbodemo-budgeting). */
+/** The enabled cash-balance feed tool for this workspace — first available
+ *  (demo before live) since there is no capability enable/disable anymore. */
 function cashFeedTool(databaseId: string): string | null {
-  const enabledSkills = enabledSkillNamesForDatabase(databaseId);
+  void databaseId;
   for (const cap of listCapabilities()) {
-    const m = cap.manifest;
-    const enabled = !m.group || (m.skills ?? []).some((s) => enabledSkills.has(s));
-    if (!enabled) continue;
     const names = new Set(cap.tools.map((t) => t.name));
     if (names.has("qbodemo_cash_balances")) return "qbodemo_cash_balances";
     if (names.has("qbo_cash_balances")) return "qbo_cash_balances";
@@ -1220,12 +1218,80 @@ async function classify(
   return { flags, dataFiles };
 }
 
+/** Resolve the data files a request references: deterministic name-token match
+ *  first, then a slim Jev fan-out only when the request still references data
+ *  without any name match. */
+async function resolveDataFiles(req: PlanRequest): Promise<string[]> {
+  const inventory = dataInventory(req.databaseId);
+  const names = resolveDataNames(
+    req.rawMessage,
+    inventory.filter((d) => !d.name.startsWith("staging_")).map((d) => ({ name: d.name })),
+  );
+  if (names.length > 0) return names;
+  if (!referencesData(req.rawMessage)) return [];
+  return classifyDataFiles(req, inventory);
+}
+
+/** Does the message reference data at all (so a miss is worth a Jev pass)? */
+function referencesData(raw: string): boolean {
+  return /\b(data|table|file|sheet|workspace|review|audit|reconcile|foot|tie|analy[sz]e|examine)\b/i.test(raw);
+}
+
+/** Slim Jev fan-out — one yes/no per loaded file, no shape flags. */
+async function classifyDataFiles(
+  req: PlanRequest,
+  inventory: { name: string; columns: string[] }[],
+): Promise<string[]> {
+  const key = await getClassifierKey(req.userId);
+
+  let privacyMap = loadPrivacyMap(req.databaseId);
+  const probe = { system: "", messages: [{ role: "user", content: req.rawMessage }] };
+  const { added } = discoverRequestValues(req.databaseId, probe);
+  if (added > 0) privacyMap = loadPrivacyMap(req.databaseId);
+
+  const questions: Record<string, Question> = {};
+  const dataFileById: Record<string, string> = {};
+  inventory.forEach((d, i) => {
+    if (d.name.startsWith("staging_")) return;
+    const id = `data_file_${i}`;
+    dataFileById[id] = d.name;
+    questions[id] = {
+      type: "noul",
+      instructions: `Does this request ask to read or analyze the data file named "${d.name}"?`,
+    };
+  });
+  if (Object.keys(questions).length === 0) return [];
+
+  const state = {
+    request: privacyMap ? maskText(req.rawMessage, privacyMap) : req.rawMessage,
+    data_files: inventory.map((d) => (d.columns.length ? `${d.name} (${d.columns.join(", ")})` : d.name)),
+  };
+
+  const { response } = await askClassifier(state, questions, { apiKey: key });
+  const noul = (name: string) => (response.answers[name] as NoulAnswer).noul >= N;
+  return Object.entries(dataFileById)
+    .filter(([id]) => noul(id))
+    .map(([, name]) => name);
+}
+
+/** Does the request ask for a report/downloadable file as the outcome? */
+function wantsReport(raw: string): boolean {
+  return /\b(report|dashboard|download|html|export|deliverable|file)\b/i.test(raw);
+}
+
+/** Which deterministic recipe a story's beats imply — the beat templates select
+ *  the recipe, so a user-authored story with the same beats reuses it. */
+function storyRecipe(beats: Beat[]): "review" | "report" | "quick-fact" | null {
+  const templates = new Set(beats.map((b) => b.template));
+  if (templates.has("map") || templates.has("verdicts")) return "review";
+  if (templates.has("report")) return "report";
+  if (templates.has("answer")) return "quick-fact";
+  return null;
+}
+
 export const cascadePlanner: Planner = {
   id: "cascade",
   async plan(req: PlanRequest): Promise<PlanResult> {
-    const { flags, dataFiles } = await classify(req);
-    const ctx: ShapeContext = { dataFiles };
-
     // Deterministic QBO statement gate — a balance-sheet / P&L request must
     // resolve to report_qbo_bs/pnl (or ask for its date), never fall through to
     // a read tool or an LLM guessing the "as of" date.
@@ -1234,19 +1300,31 @@ export const cascadePlanner: Planner = {
       return await qboStatementPlan(req, stmt);
     }
 
-    // Story-driven dispatch — when the orchestrator selected a story, derive the
-    // plan from it instead of re-classifying the request shape. `generic` (and
-    // absent/unknown stories) fall through to the SHAPES dispatch below.
-    if (req.story === "audit-review") {
-      return await dataReviewPlan(req, flags, ctx);
-    }
-    if (req.story === "report") {
-      return await analysisPlan(req, { ...flags, report: true, explore: false }, ctx);
-    }
-    if (req.story === "quick-fact") {
-      return await quickFactPlan(req, ctx);
+    // Beat-driven dispatch — the selected story's beats select the recipe, so a
+    // user-authored story reuses a deterministic builder. Data files resolve
+    // deterministically (name match, with a slim Jev fallback) instead of a
+    // separate plan-shape classifier.
+    if (req.story && req.story !== "generic") {
+      const story = loadAllStories(req.databaseId).find((s) => s.id === req.story);
+      if (story) {
+        const dataFiles = await resolveDataFiles(req);
+        const ctx: ShapeContext = { dataFiles };
+        const recipe = storyRecipe(story.beats);
+        if (recipe === "review") {
+          return await dataReviewPlan(req, { report: wantsReport(req.rawMessage) }, ctx);
+        }
+        if (recipe === "report") {
+          return await analysisPlan(req, { report: true, explore: false }, ctx);
+        }
+        if (recipe === "quick-fact") {
+          return await quickFactPlan(req, ctx);
+        }
+      }
     }
 
+    // Fallback (generic / no story): classify the request shape + data files.
+    const { flags, dataFiles } = await classify(req);
+    const ctx: ShapeContext = { dataFiles };
     for (const shape of SHAPES) {
       if (shape.matches(flags)) {
         return await shape.build(req, flags, ctx);
