@@ -687,9 +687,9 @@ export function buildReview(
 }
 
 // ────────────────────────────────────────────────────────────────
-/** Render the deterministic `tie_out` tool result as a per-schedule tie-out
- *  table — the direct answer to "do the supporting schedules tie to the trial
- *  balance". No LLM narration: figures and verdicts are templated verbatim. */
+/** Render the deterministic `tie_out` tool result — the direct answer to "do the
+ *  supporting schedules tie to the trial balance". No LLM narration: figures and
+ *  verdicts are templated verbatim from the tool output. */
 export function renderTieOutReport(text: string): { markdown: string; payload: unknown } {
   let data: any;
   try {
@@ -698,48 +698,88 @@ export function renderTieOutReport(text: string): { markdown: string; payload: u
     return { markdown: "⚠ Tie-out could not be parsed.", payload: null };
   }
 
-  const summary = data?.summary ?? {};
-  const rows = Array.isArray(data?.schedules) ? data.schedules : [];
+  const accounts = Array.isArray(data?.accounts) ? data.accounts : [];
+  const schedules = Array.isArray(data?.schedules) ? data.schedules : [];
+  const asum = data?.summary?.accounts ?? {};
+  const ssum = data?.summary?.schedules ?? {};
 
   const verdict = (status: string) =>
     status === "tie"
       ? "✅ Tie"
       : status === "variance"
         ? "🔴 Variance"
-        : status === "unmatched"
-          ? "❓ Unmatched"
-          : "⚠ Unresolved";
+        : status === "missing_bs"
+          ? "❓ Missing on balance sheet"
+          : status === "missing_tb"
+            ? "❓ Missing in trial balance"
+            : status === "unmatched"
+              ? "❓ Unmatched"
+              : "⚠ Unresolved";
 
   const money = (n: number | null) => (typeof n === "number" ? fmtMoney(n) : "—");
 
-  const tableRows = rows
-    .map((r: any) => {
-      const accts = Array.isArray(r?.tb_accounts) ? r.tb_accounts.join(", ") : "";
-      return (
-        `| \`${r.schedule}\` | ${accts || "—"} | ${money(r.schedule_total)} | ` +
-        `${money(r.tb_balance)} | ${money(r.variance)} | ${verdict(r.status)} |`
-      );
-    })
-    .join("\n");
+  const lines: string[] = ["## Tie-out: do the supporting schedules tie to the trial balance?", ""];
 
-  const lines: string[] = [
-    "## Tie-out: do the supporting schedules tie to the trial balance?",
+  // Bottom-line conclusion first.
+  const tolerance = typeof data?.tolerance === "number" ? data.tolerance : 0;
+  const schedTotal = schedules.length;
+  const conclusion =
+    schedTotal === 0
+      ? "No supporting schedules were identified in the balance-sheet Notes."
+      : `${ssum.tied ?? 0} of ${schedTotal} schedule${schedTotal === 1 ? "" : "s"} tie to the trial balance` +
+        ` (${ssum.variance ?? 0} variance, ${ssum.unmatched ?? 0} unmatched, ${ssum.unresolved ?? 0} unresolved).`;
+  lines.push(`**Conclusion** — ${conclusion}`, "");
+  lines.push(
+    `_Compared the balance sheet to the trial balance by account code, magnitude-matched ` +
+      `(tolerance ${tolerance}). Schedule totals are the balance-sheet line totals._`,
     "",
-    "| Schedule | TB account(s) | Schedule total | TB balance | Variance | Verdict |",
-    "|---|---|---|---|---|---|",
-    tableRows || "| _no schedules_ | — | — | — | — | — |",
-    "",
-    `**Summary** — ${summary.tied ?? 0} tie, ${summary.variance ?? 0} variance, ` +
-      `${summary.unmatched ?? 0} unmatched, ${summary.unresolved ?? 0} unresolved.`,
-  ];
+  );
 
-  const unresolved = rows.filter((r: any) => r.status === "unresolved");
+  if (schedules.length > 0) {
+    const tableRows = schedules
+      .map((r: any) => {
+        const codes = Array.isArray(r?.account_codes) ? r.account_codes.join(", ") : "";
+        return (
+          `| \`${r.schedule}\` | ${codes || "—"} | ${money(r.schedule_total)} | ` +
+          `${money(r.tb_balance)} | ${money(r.variance)} | ${verdict(r.status)} |`
+        );
+      })
+      .join("\n");
+    lines.push(
+      "| Schedule | TB account(s) | Schedule total | TB balance | Variance | Verdict |",
+      "|---|---|---|---|---|---|",
+      tableRows,
+      "",
+    );
+  }
+
+  // Account-level reconciliation: summarize ties, list only variances/missing.
+  const accountIssues = accounts.filter((a: any) => a.status !== "tie");
+  lines.push(
+    `**Accounts** — ${asum.tied ?? 0} tie, ${asum.variance ?? 0} variance, ` +
+      `${asum.missing_bs ?? 0} missing on balance sheet, ${asum.missing_tb ?? 0} missing in trial balance.`,
+  );
+  if (accountIssues.length > 0) {
+    lines.push("");
+    const issueRows = accountIssues
+      .map((a: any) => {
+        const diff =
+          typeof a.variance === "number" && a.status === "variance"
+            ? ` (diff ${money(a.variance)})`
+            : "";
+        return `- \`${a.code}\` ${a.name} — ${verdict(a.status)}${diff}`;
+      })
+      .join("\n");
+    lines.push(issueRows);
+  }
+
+  const unresolved = schedules.filter((r: any) => r.status === "unresolved");
   if (unresolved.length > 0) {
     lines.push("", "### Could not resolve");
     for (const r of unresolved) lines.push(`- \`${r.schedule}\` — ${r.basis}`);
   }
 
-  const unmatched = rows.filter((r: any) => r.status === "unmatched");
+  const unmatched = schedules.filter((r: any) => r.status === "unmatched");
   if (unmatched.length > 0) {
     lines.push("", "### Unmatched");
     for (const r of unmatched) lines.push(`- \`${r.schedule}\` — ${r.basis}`);

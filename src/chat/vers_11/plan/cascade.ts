@@ -1075,76 +1075,49 @@ async function dataReviewPlan(
 
 // ── tie-out shape: deterministic schedule ↔ trial-balance reconciliation ────
 // "do the supporting schedules tie to the trial balance" — a focused plan that
-// identifies the trial balance and the supporting schedules, then runs the
-// deterministic `tie_out` tool (rather than the generic review battery, which
-// profiles/checks tables but never actually compares schedule totals to the TB).
+// runs the deterministic `tie_out` tool (which reads the raw Trial Balance and
+// Balance Sheet and joins on account number), rather than the generic review
+// battery, which profiles/checks tables but never ties schedules out.
 
-const DEBIT_HINT = /debit|\bdr\b/i;
-const CREDIT_HINT = /credit|\bcr\b/i;
-
-/** Identify the trial-balance table: name first, else a table with both a
- *  debit-ish and a credit-ish numeric column. */
-export function detectTrialBalance(inventory: ReviewEntry[]): ReviewEntry | null {
-  const byName = inventory.filter((d) => /trial\s*balance/i.test(d.name));
-  if (byName.length > 0) return byName.sort((a, b) => b.rowCount - a.rowCount)[0];
-  const dual = inventory.filter((d) => {
-    const hasDebit = d.columns.some((c) => DEBIT_HINT.test(c) && isNumericColumn(c, d.columnTypes));
-    const hasCredit = d.columns.some((c) => CREDIT_HINT.test(c) && isNumericColumn(c, d.columnTypes));
-    return hasDebit && hasCredit;
-  });
-  return dual.sort((a, b) => b.rowCount - a.rowCount)[0] ?? null;
+/** Raw json_cells sheet names (formatted/multi-table reports). */
+function rawSheetNames(databaseId: string): string[] {
+  try {
+    const ws = getSessionByDatabaseId(databaseId);
+    if (!ws) return [];
+    return ws.getDataNames().filter((n) => ws.getDataEntry(n)?.content_type === "json_cells");
+  } catch {
+    return [];
+  }
 }
 
-/** The supporting schedule tables: every other loaded table with rows. */
-export function scheduleTables(inventory: ReviewEntry[], tbName: string): ReviewEntry[] {
-  return inventory.filter(
-    (d) =>
-      d.name !== tbName &&
-      !d.name.startsWith("staging_") &&
-      !d.name.startsWith("source_") &&
-      d.rowCount > 0,
-  );
-}
-
-/** Build the tie-out plan: bulk read the trial balance + schedules, then run the
- *  deterministic `tie_out` comparison. Fail-closed: clarify when no trial
- *  balance is identifiable, fallback when there is nothing to tie out. */
+/** Build the tie-out plan: run the deterministic `tie_out` tool over the raw
+ *  trial balance (the tool auto-discovers the balance sheet and derives the
+ *  supporting schedules from its Notes column). Fail-closed: clarify when no
+ *  trial-balance sheet is identifiable. */
 async function tieOutPlan(
   req: PlanRequest,
   flags: Flags,
   ctx: ShapeContext,
 ): Promise<PlanResult> {
+  void flags;
   void ctx;
-  const inventory = reviewInventory(req.databaseId).filter((d) => !d.name.startsWith("staging_"));
-
-  const tb = detectTrialBalance(inventory);
-  if (!tb) {
-    const names = inventory.filter((d) => d.rowCount > 0).map((d) => d.name);
+  const raw = rawSheetNames(req.databaseId);
+  const tbName = raw.find((n) => /trial[_\s-]*balance/i.test(n));
+  if (!tbName) {
     return {
       kind: "clarify",
       missing: ["tie_out.trial_balance"],
       question:
-        `I couldn't identify the trial balance among the loaded tables. ` +
-        `Which table is the trial balance? Loaded: ${names.length ? names.map((n) => `\`${n}\``).join(", ") : "(none)"}.`,
+        `I couldn't find a Trial Balance sheet in the loaded data. ` +
+        `Which sheet is the trial balance?`,
     };
-  }
-
-  const schedules = scheduleTables(inventory, tb.name);
-  if (schedules.length === 0) {
-    return { kind: "fallback", reason: "no supporting schedule tables to tie out" };
   }
 
   const steps: PlanStep[] = [
     {
-      tool_id: "get_data",
-      tool_parameters: { names: [tb.name, ...schedules.map((s) => s.name)] },
-      label: `Read trial balance + ${schedules.length} schedule${schedules.length === 1 ? "" : "s"}`,
-      beat: "setup",
-    },
-    {
       tool_id: "tie_out",
-      tool_parameters: { trial_balance: tb.name, schedules: schedules.map((s) => s.name) },
-      label: `Tie ${schedules.length} schedule${schedules.length === 1 ? "" : "s"} to the trial balance`,
+      tool_parameters: { trial_balance: tbName },
+      label: "Tie supporting schedules to the trial balance",
       beat: "status",
     },
   ];

@@ -26,6 +26,7 @@ import {
   colIndexToLetters,
   type StagedTable,
 } from "./stage";
+import { synthesizeStatement, detectStatementKind } from "./statementSynth";
 
 interface SynthTable {
   slug: string;
@@ -168,6 +169,15 @@ export async function synthesize(
   if (Object.keys(cells).length === 0) return [];
 
   const grid = cellMapToGrid(cells);
+
+  // Deterministic statement/trial-balance synthesis — these sheets are a single
+  // table with sections, which the LLM structure-mapping mis-slices into
+  // transposed/fragmented tables. Synthesize them directly (no LLM).
+  const statement = synthesizeStatement(grid);
+  if (statement && statement.rows.length > 0) {
+    const slug = detectStatementKind(grid) === "trial_balance" ? "trial_balance" : "statement";
+    return writeSynth(session, name, [{ slug, table: buildTable(statement.columns, statement.rows, 0) }]);
+  }
 
   // 1. LLM structure mapping (value-free) — preferred for arbitrary layouts.
   let tables: SynthTable[] | null = null;

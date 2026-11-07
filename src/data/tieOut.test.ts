@@ -1,94 +1,148 @@
 import { describe, expect, test } from "bun:test";
-import { tieOut, type TieOutTable } from "./tieOut";
+import { tieOut, type TieOutSheet } from "./tieOut";
 
-const TB: TieOutTable = {
-  name: "trial_balance",
-  columns: ["Account Name", "Debit", "Credit"],
-  columnTypes: { "Account Name": "text", Debit: "currency", Credit: "currency" },
-  rows: [
-    { "Account Name": "1000 Bank Checking", Debit: "4567.27", Credit: "" },
-    { "Account Name": "1020 Intercompany Receivable", Debit: "20797.92", Credit: "" },
-    { "Account Name": "2009 Intercompany Payable", Debit: "", Credit: "2444581.56" },
-  ],
-};
+const TB_GRID = [
+  ["Coreline Ventures LLC", "", ""],
+  ["Trial Balance", "", ""],
+  ["As of Sep 30, 2026", "", ""],
+  ["", "", ""],
+  ["Account Name", "Debit", "Credit"],
+  ["1000 Bank Checking **", "4567.27", ""],
+  ["1001 Citizens Checking - 4279", "250000", ""],
+  ["1055 Due from Employee", "", "0"],
+  ["1090 Accounts Payable", "", "118085.71"],
+  ["2005 Ramp card", "", "1159.49"],
+  ["TOTAL", "6732231.33", "6732231.33"],
+  ["", "", ""],
+  ["Accrual Basis Friday, October 30, 2026 04:00 PM GMT-07:00", "", ""],
+];
 
-function schedule(name: string, rows: Record<string, unknown>[], amountType = "currency"): TieOutTable {
-  const columns = ["Account", "Amount"];
-  return {
-    name,
-    columns,
-    columnTypes: { Account: "text", Amount: amountType },
-    rows: rows.map((r) => ({ Account: r.Account, Amount: r.Amount })),
-  };
+const BS_GRID = [
+  ["Coreline Ventures LLC", "", "", ""],
+  ["Balance Sheet", "", "", ""],
+  ["As of Sep 30, 2026", "", "", ""],
+  ["", "", "", ""],
+  ["", "Total", "Check", "Notes"],
+  ["Assets", "", "", ""],
+  ["Bank Accounts", "", "", ""],
+  ["1000 Bank Checking **", "4567.27", "0", "1. Cash"],
+  ["1001 Citizens Checking - 4279", "250000", "0", "1. Cash"],
+  ["Total Bank Accounts", "254567.27", "", ""],
+  ["1055 Due from Employee", "0", "0", "3. Due from EE"],
+  ["1090 Accounts Payable", "118085.71", "0", "4. AP Aging"],
+  ["2005 Ramp card", "1159.49", "0", "5. Ramp"],
+];
+
+function run(bs: TieOutSheet | null = { name: "bs", grid: BS_GRID }) {
+  return tieOut({
+    trialBalance: { name: "cp_trial_balance", grid: TB_GRID },
+    balanceSheet: bs,
+  });
 }
 
 describe("tieOut", () => {
-  test("ties a schedule to its account by name token (bank)", () => {
-    const s = schedule("balance_sheet_bank_accounts", [{ Account: "1000 Bank Checking", Amount: "4567.27" }]);
-    const r = tieOut(TB, [s]);
-    expect(r.schedules[0]).toMatchObject({
-      status: "tie",
-      schedule_total: 4567.27,
-      tb_balance: 4567.27,
-      variance: 0,
-    });
-    expect(r.schedules[0].tb_accounts).toEqual(["1000 Bank Checking"]);
-    expect(r.summary.tied).toBe(1);
-  });
-
-  test("ties a schedule to its account by account code", () => {
-    const s = schedule("balance_sheet_1020_intercompany", [{ Account: "1020 Intercompany Receivable", Amount: "20797.92" }]);
-    const r = tieOut(TB, [s]);
-    expect(r.schedules[0].status).toBe("tie");
-    expect(r.schedules[0].tb_accounts).toEqual(["1020 Intercompany Receivable"]);
-  });
-
-  test("flags a variance when the schedule total disagrees with the account balance", () => {
-    const s = schedule("balance_sheet_bank_accounts", [{ Account: "1000 Bank Checking", Amount: "5000.00" }]);
-    const r = tieOut(TB, [s]);
-    expect(r.schedules[0].status).toBe("variance");
-    expect(r.schedules[0].variance).toBe(432.73);
-    expect(r.summary.variance).toBe(1);
-  });
-
-  test("ties a credit (liability) schedule via its account-column value", () => {
-    const s = schedule("balance_sheet_other_current_liabilities", [
-      { Account: "2009 Intercompany Payable", Amount: "-2444581.56" },
+  test("reconciles every balance-sheet account (assets and liabilities) by code and magnitude", () => {
+    const r = run();
+    expect(r.accounts.map((a) => [a.code, a.status])).toEqual([
+      ["1000", "tie"],
+      ["1001", "tie"],
+      ["1055", "tie"],
+      ["1090", "tie"],
+      ["2005", "tie"],
     ]);
-    const r = tieOut(TB, [s]);
-    expect(r.schedules[0].status).toBe("tie");
-    expect(r.schedules[0].tb_balance).toBe(-2444581.56);
-    expect(r.schedules[0].tb_accounts).toEqual(["2009 Intercompany Payable"]);
+    expect(r.summary.accounts).toEqual({ tied: 5, variance: 0, missing_bs: 0, missing_tb: 0 });
   });
 
-  test("marks a schedule unmatched when no account code or name token matches", () => {
-    const s = schedule("balance_sheet_9999_misc", [{ Account: "9999 Mystery", Amount: "123.45" }]);
-    const r = tieOut(TB, [s]);
-    expect(r.schedules[0].status).toBe("unmatched");
-    expect(r.schedules[0].tb_accounts).toEqual([]);
-    expect(r.summary.unmatched).toBe(1);
+  test("flags an account variance when the balance sheet disagrees with the trial balance", () => {
+    const bs: TieOutSheet = {
+      name: "bs",
+      grid: BS_GRID.map((row) => (row[0] === "1000 Bank Checking **" ? [row[0], "5000.00", "0", "1. Cash"] : row)),
+    };
+    const r = run(bs);
+    const acct = r.accounts.find((a) => a.code === "1000")!;
+    expect(acct.status).toBe("variance");
+    expect(acct.variance).toBe(432.73);
   });
 
-  test("marks a transposed schedule unresolved (bare-number amount column) rather than summing garbage", () => {
-    const s: TieOutTable = {
-      name: "balance_sheet_bank_accounts",
-      columns: ["1000 Bank Checking **", "4567.27"],
-      columnTypes: { "1000 Bank Checking **": "text", "4567.27": "currency" },
-      rows: [
-        { "1000 Bank Checking **": "1001 Citizens Checking - 4279", "4567.27": "250000" },
-        { "1000 Bank Checking **": "1002 Citizens Sweep - 4295", "4567.27": "420127.2" },
+  test("flags missing_tb when a balance-sheet account has no trial-balance balance", () => {
+    const bs: TieOutSheet = {
+      name: "bs",
+      grid: [
+        ["", "Total", "Check", "Notes"],
+        ["1000 Bank Checking **", "4567.27", "0", "1. Cash"],
+        ["9999 Extra BS Account", "10.00", "", ""],
       ],
     };
-    const r = tieOut(TB, [s]);
-    expect(r.schedules[0].status).toBe("unresolved");
-    expect(r.schedules[0].schedule_total).toBeNull();
-    expect(r.summary.unresolved).toBe(1);
+    const r = run(bs);
+    expect(r.accounts.find((a) => a.code === "9999")!.status).toBe("missing_tb");
+    expect(r.summary.accounts.missing_tb).toBe(1);
   });
 
-  test("reports the trial balance account column", () => {
-    const s = schedule("balance_sheet_bank_accounts", [{ Account: "1000 Bank Checking", Amount: "4567.27" }]);
-    const r = tieOut(TB, [s]);
-    expect(r.account_column).toBe("Account Name");
-    expect(r.trial_balance).toBe("trial_balance");
+  test("derives schedules from the balance-sheet Notes and ties each", () => {
+    const r = run();
+    expect(r.schedules.map((s) => [s.schedule, s.status, s.account_codes])).toEqual([
+      ["1. Cash", "tie", ["1000", "1001"]],
+      ["3. Due from EE", "tie", ["1055"]],
+      ["4. AP Aging", "tie", ["1090"]],
+      ["5. Ramp", "tie", ["2005"]],
+    ]);
+    const apAging = r.schedules.find((s) => s.schedule === "4. AP Aging")!;
+    expect(apAging.schedule_total).toBe(118085.71);
+    expect(apAging.tb_balance).toBe(-118085.71);
+    expect(apAging.variance).toBe(0);
+    expect(r.summary.schedules).toEqual({ tied: 4, variance: 0, unmatched: 0, unresolved: 0 });
+  });
+
+  test("maps a 'Total for X' note to the whole account group (intercompany)", () => {
+    const tb: TieOutSheet = {
+      name: "tb",
+      grid: [
+        ["Account Name", "Debit", "Credit"],
+        ["1020 Intercompany:1021 Due from CI", "20797.92", ""],
+        ["1020 Intercompany:1022 Due from CII", "112468.71", ""],
+      ],
+    };
+    const bs: TieOutSheet = {
+      name: "bs",
+      grid: [
+        ["", "Total", "Notes"],
+        ["1021 Due from CI", "20797.92", ""],
+        ["1022 Due from CII", "112468.71", ""],
+        ["Total for 1020 Intercompany", "133266.63", "2. Intercompany"],
+      ],
+    };
+    const r = tieOut({ trialBalance: tb, balanceSheet: bs });
+    const s = r.schedules[0];
+    expect(s.schedule).toBe("2. Intercompany");
+    expect(s.status).toBe("tie");
+    expect(s.account_codes.sort()).toEqual(["1021", "1022"]);
+    expect(s.schedule_total).toBe(133266.63);
+  });
+
+  test("marks a schedule unresolved when accounts map but no balance-sheet line total exists", () => {
+    const tb: TieOutSheet = {
+      name: "tb",
+      grid: [["Account Name", "Debit", "Credit"], ["1020 Intercompany:1021 Due from CI", "20797.92", ""]],
+    };
+    const bs: TieOutSheet = {
+      name: "bs",
+      grid: [["", "Total", "Notes"], ["Total for 1020 Intercompany", "545306.59", "2. Intercompany"]],
+    };
+    const r = tieOut({ trialBalance: tb, balanceSheet: bs });
+    expect(r.schedules[0].status).toBe("unresolved");
+    expect(r.schedules[0].account_codes).toEqual(["1021"]);
+  });
+
+  test("reports no schedules when the balance sheet has no notes", () => {
+    const bs: TieOutSheet = {
+      name: "bs",
+      grid: [
+        ["", "Total"],
+        ["1000 Bank Checking **", "4567.27"],
+      ],
+    };
+    const r = run(bs);
+    expect(r.schedules).toEqual([]);
+    expect(r.summary.schedules.tied).toBe(0);
   });
 });

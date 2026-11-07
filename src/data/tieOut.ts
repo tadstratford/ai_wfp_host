@@ -1,67 +1,69 @@
 /**
- * Deterministic trial-balance tie-out — pure functions, no app imports.
+ * Deterministic trial-balance tie-out — pure functions, no app imports, no LLM.
  *
- * Ties supporting schedules / sub-ledgers to a trial balance: for each schedule
- * the engine sums its amount column and compares that total against the matched
- * trial-balance account balance(s), producing a per-schedule `tie` / `variance`
- * / `unmatched` / `unresolved` verdict.
+ * Ties the supporting schedules to the trial balance using the ACCOUNT NUMBER as
+ * the join key. Two clean grids drive it:
+ *   - the Trial Balance (`Account Name | Debit | Credit`) → account → balance,
+ *   - the Balance Sheet (`Account | Amount | … | Notes`) → account → amount +
+ *     the supporting-schedule reference in the Notes column.
  *
- * Everything is resolved deterministically from column names + inferred types:
- *   - the trial balance's account column and debit/credit (or amount) columns,
- *   - each schedule's amount column (a bare-number column name marks a
- *     transposed/unresolved sheet — fail closed rather than sum garbage),
- *   - schedule → trial-balance account matching by account code (a run of digits
- *     in the schedule's data name) then by significant name tokens.
- *
- * Used by the `tie_out` MCP tool.
+ * Because both statements use hierarchical account numbers ("1020 Intercompany:
+ * 1021 Due from …"), the join key is the LEAF account code (the last numeric
+ * token). Schedule sheets are matched to their trial-balance accounts by the
+ * 4-digit account codes found in their cells, falling back to the Balance
+ * Sheet's Notes mapping; a schedule's total is read from a labeled TOTAL row
+ * where one exists, else from the Balance Sheet line, else it is `unresolved`
+ * (never guessed).
  */
 
-export interface TieOutTable {
+export interface TieOutSheet {
   name: string;
-  columns: string[];
-  columnTypes: Record<string, string> | null;
-  rows: Record<string, unknown>[];
+  grid: string[][];
 }
 
-export type TieOutStatus = "tie" | "variance" | "unmatched" | "unresolved";
+export type AccountStatus = "tie" | "variance" | "missing_bs" | "missing_tb";
+
+export interface TieOutAccount {
+  code: string;
+  name: string;
+  bs_amount: number | null;
+  tb_balance: number | null;
+  variance: number | null;
+  status: AccountStatus;
+}
+
+export type ScheduleStatus = "tie" | "variance" | "unmatched" | "unresolved";
 
 export interface ScheduleTieOut {
   schedule: string;
-  status: TieOutStatus;
-  /** Sum of the schedule's amount column (null when unresolved). */
+  account_codes: string[];
   schedule_total: number | null;
-  /** Trial-balance account(s) the schedule matched to (by code/name token). */
-  tb_accounts: string[];
-  /** Sum of the matched trial-balance accounts' balances. */
   tb_balance: number | null;
-  /** schedule_total - tb_balance (null when either side is unresolved). */
   variance: number | null;
-  /** Human-readable basis for the match (or the reason it is unresolved). */
+  status: ScheduleStatus;
   basis: string;
 }
 
 export interface TieOutResult {
   trial_balance: string;
-  account_column: string | null;
+  balance_sheet: string | null;
+  tolerance: number;
+  accounts: TieOutAccount[];
   schedules: ScheduleTieOut[];
-  summary: { tied: number; variance: number; unmatched: number; unresolved: number };
+  summary: {
+    accounts: { tied: number; variance: number; missing_bs: number; missing_tb: number };
+    schedules: { tied: number; variance: number; unmatched: number; unresolved: number };
+  };
 }
 
-const AMOUNT_HINT = /amount|total|balance|debit|credit|fee|revenue|cost|principal|interest|value|price|gross|net|sum/i;
-const RATIO_HINT = /%|percent|pct|share|ratio|proportion|rate\b/i;
-const BARE_NUMBER = /^[-+]?\d[\d,]*(\.\d+)?$/;
+const CODE_RE = /\d{4}/g;
 
-/** Generic tokens that never identify an account from a table name. */
-const GENERIC_TOKENS = new Set([
-  "synth", "cp", "trial", "balance", "sheet", "as", "of", "sep", "oct", "nov", "dec",
-  "jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "ytd", "part", "schedule",
-  "the", "and", "for", "with", "other", "current", "liabilities", "assets", "accounts",
-]);
-
-function toNumber(v: unknown): number | null {
+function parseNumber(v: unknown): number | null {
   if (typeof v === "number") return Number.isFinite(v) ? v : null;
   if (typeof v === "string") {
-    const t = v.trim().replace(/[,$%]/g, "");
+    let t = v.trim();
+    if (/^\(.*\)$/.test(t)) t = "-" + t.slice(1, -1); // (1,000) → negative
+    t = t.replace(/[,$%\s]/g, "");
     if (t === "" || !/^-?\d*\.?\d+(e-?\d+)?$/i.test(t)) return null;
     const n = Number(t);
     return Number.isFinite(n) ? n : null;
@@ -69,226 +71,307 @@ function toNumber(v: unknown): number | null {
   return null;
 }
 
-function isNumericColumn(name: string, types: Record<string, string> | null): boolean {
-  if (RATIO_HINT.test(name)) return false;
-  const t = types?.[name];
-  if (typeof t === "string") return /number|integer|float|decimal|currency/i.test(t);
-  return AMOUNT_HINT.test(name);
-}
-
-interface BalanceColumns {
-  debit: string | null;
-  credit: string | null;
-  amount: string | null;
-  /** True when the only numeric column is bare-number-named (a transposed sheet). */
-  transposed: boolean;
-}
-
-function detectBalanceColumns(table: TieOutTable): BalanceColumns {
-  const numeric = table.columns.filter((c) => isNumericColumn(c, table.columnTypes));
-  const named = numeric.filter((c) => AMOUNT_HINT.test(c) && !BARE_NUMBER.test(c.trim()));
-  const typed = numeric.filter((c) => !BARE_NUMBER.test(c.trim()));
-
-  const debit = named.find((c) => /debit|dr\b/i.test(c)) ?? null;
-  const credit = named.find((c) => /credit|cr\b/i.test(c)) ?? null;
-  const amount = named[0] ?? typed[0] ?? numeric[0] ?? null;
-
-  // A bare-number column name means the sheet header was a value, not a label —
-  // the table is transposed and its "amount" is not a real amount column.
-  const transposed = !!amount && BARE_NUMBER.test(amount.trim());
-
-  return { debit, credit, amount: debit || credit ? null : amount, transposed };
-}
-
-function accountColumnOf(table: TieOutTable): string | null {
-  const categorical = table.columns.filter(
-    (c) => !isNumericColumn(c, table.columnTypes) && !BARE_NUMBER.test(c.trim()),
-  );
-  return (
-    categorical.find((c) => /account|name|entity|code|ref|description/i.test(c)) ??
-    categorical[0] ??
-    null
-  );
-}
-
-function accountCodes(name: string): string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const m of name.match(/\d{3,5}/g) ?? []) {
-    if (!seen.has(m)) {
-      seen.add(m);
-      out.push(m);
-    }
-  }
-  return out;
-}
-
-function significantTokens(name: string): string[] {
-  return name
-    .toLowerCase()
-    .replace(/^synth_/, "")
-    .replace(/^cp_/, "")
-    .split(/[_\s]+/)
-    .map((t) => t.replace(/[^a-z0-9]/g, ""))
-    .filter((t) => t.length >= 3 && !GENERIC_TOKENS.has(t) && !/^\d+$/.test(t));
-}
-
-/** Match a schedule to trial-balance accounts. Priority: the schedule's own
- *  account-column values (strongest), then account codes in the schedule name,
- *  then significant name tokens. Returns every matched TB account name plus a
- *  human-readable basis so the pairing is auditable. */
-function matchTbAccounts(
-  schedule: TieOutTable,
-  tbRows: Record<string, unknown>[],
-  accountCol: string | null,
-): { accounts: string[]; basis: string } {
-  if (!accountCol) return { accounts: [], basis: "trial balance has no account column" };
-  const names = tbRows.map((r) => String(r[accountCol] ?? "").trim()).filter(Boolean);
-
-  // 1) Account-column values in the schedule are the accounts it details.
-  const schedAcctCol = accountColumnOf(schedule);
-  if (schedAcctCol) {
-    const values = schedule.rows.map((r) => String(r[schedAcctCol] ?? "").trim()).filter(Boolean);
-    if (values.length > 0) {
-      const valueCodes = [...new Set(values.flatMap(accountCodes))];
-      if (valueCodes.length > 0) {
-        const hits = names.filter((n) => valueCodes.some((c) => n.includes(c)));
-        if (hits.length > 0) {
-          return { accounts: hits, basis: `account code(s) ${valueCodes.join(", ")} in schedule` };
-        }
-      }
-      const hits = names.filter(
-        (n) => values.some((v) => n.toLowerCase().includes(v.toLowerCase()) || v.toLowerCase().includes(n.toLowerCase())),
-      );
-      if (hits.length > 0) return { accounts: hits, basis: "account name(s) in schedule" };
-    }
-  }
-
-  // 2) Account codes in the schedule's data name.
-  const codes = accountCodes(schedule.name);
-  if (codes.length > 0) {
-    const hits = names.filter((n) => codes.some((c) => n.includes(c)));
-    if (hits.length > 0) return { accounts: hits, basis: `account code(s) ${codes.join(", ")}` };
-  }
-
-  // 3) Significant name tokens.
-  const tokens = significantTokens(schedule.name);
-  if (tokens.length > 0) {
-    const hits = names.filter((n) => tokens.some((t) => n.toLowerCase().includes(t)));
-    if (hits.length > 0) return { accounts: hits, basis: `name token(s) ${tokens.join(", ")}` };
-  }
-
-  return { accounts: [], basis: "no account code or name token matched the trial balance" };
-}
-
-function totalOf(
-  rows: Record<string, unknown>[],
-  debit: string | null,
-  credit: string | null,
-  amount: string | null,
-): number | null {
-  let total = 0;
-  let any = false;
-  for (const r of rows) {
-    const d = debit ? toNumber(r[debit]) : null;
-    const c = credit ? toNumber(r[credit]) : null;
-    const a = amount ? toNumber(r[amount]) : null;
-    if (d === null && c === null && a === null) continue;
-    any = true;
-    total += (d ?? 0) - (c ?? 0) + (a ?? 0);
-  }
-  return any ? total : null;
-}
-
-function tieOutOne(
-  schedule: TieOutTable,
-  tbRows: Record<string, unknown>[],
-  accountCol: string | null,
-  tbBalance: Map<string, number>,
-  tolerance: number,
-): ScheduleTieOut {
-  const cols = detectBalanceColumns(schedule);
-  if (cols.transposed) {
-    return {
-      schedule: schedule.name,
-      status: "unresolved",
-      schedule_total: null,
-      tb_accounts: [],
-      tb_balance: null,
-      variance: null,
-      basis: "transposed sheet (amount column is a value, not a label) — resolve its data shape first",
-    };
-  }
-
-  const scheduleTotal = totalOf(schedule.rows, cols.debit, cols.credit, cols.amount);
-  if (scheduleTotal === null) {
-    return {
-      schedule: schedule.name,
-      status: "unresolved",
-      schedule_total: null,
-      tb_accounts: [],
-      tb_balance: null,
-      variance: null,
-      basis: "no numeric amount column detected",
-    };
-  }
-
-  const match = matchTbAccounts(schedule, tbRows, accountCol);
-  if (match.accounts.length === 0) {
-    return {
-      schedule: schedule.name,
-      status: "unmatched",
-      schedule_total: scheduleTotal,
-      tb_accounts: [],
-      tb_balance: null,
-      variance: null,
-      basis: match.basis,
-    };
-  }
-
-  const tbBalanceSum = match.accounts.reduce((s, a) => s + (tbBalance.get(a) ?? 0), 0);
-  const variance = round2(scheduleTotal - tbBalanceSum);
-  const status: TieOutStatus = Math.abs(variance) > tolerance ? "variance" : "tie";
-
-  return {
-    schedule: schedule.name,
-    status,
-    schedule_total: scheduleTotal,
-    tb_accounts: match.accounts,
-    tb_balance: tbBalanceSum,
-    variance,
-    basis: match.basis,
-  };
-}
-
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
-export function tieOut(
-  trialBalance: TieOutTable,
-  schedules: TieOutTable[],
-  tolerance = 0,
-): TieOutResult {
-  const accountCol = accountColumnOf(trialBalance);
-  const tbCols = detectBalanceColumns(trialBalance);
+/** All 4-digit account codes in a string (order-preserving). */
+function accountCodes(text: string): string[] {
+  const out: string[] = [];
+  for (const m of String(text ?? "").match(CODE_RE) ?? []) {
+    if (!out.includes(m)) out.push(m);
+  }
+  return out;
+}
 
-  const tbBalance = new Map<string, number>();
-  for (const r of trialBalance.rows) {
-    const key = String(r[accountCol ?? ""] ?? "").trim();
-    if (!key) continue;
-    const bal = totalOf([r], tbCols.debit, tbCols.credit, tbCols.amount) ?? 0;
-    tbBalance.set(key, (tbBalance.get(key) ?? 0) + bal);
+/** The account code used as the join key: the child code after the last ":" in a
+ *  hierarchical name ("1020 Intercompany:1021 Due from …" → 1021), otherwise the
+ *  FIRST code ("1001 Citizens Checking - 4279" → 1001, not the 4279 suffix). */
+function leafCode(text: string): string | null {
+  const t = String(text ?? "");
+  const colonIdx = t.lastIndexOf(":");
+  if (colonIdx >= 0) {
+    const child = accountCodes(t.slice(colonIdx + 1));
+    if (child.length > 0) return child[child.length - 1];
+  }
+  const codes = accountCodes(t);
+  return codes.length > 0 ? codes[0] : null;
+}
+
+// ── Trial Balance ────────────────────────────────────────────────────────────
+
+interface TbAccount {
+  code: string | null;
+  name: string;
+  balance: number;
+}
+
+/** Parse the Trial Balance grid: find the Account/Debit/Credit header row, then
+ *  read account rows (skip titles, the TOTAL row, and the accrual footer). */
+function parseTrialBalance(grid: string[][]): TbAccount[] {
+  const rows = grid.filter((r) => (r ?? []).some((c) => String(c ?? "").trim() !== ""));
+  if (rows.length === 0) return [];
+
+  let headerIdx = -1;
+  let accountCol = -1;
+  let debitCol = -1;
+  let creditCol = -1;
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    const a = r.findIndex((c) => /account/i.test(String(c ?? "")));
+    const d = r.findIndex((c) => /debit/i.test(String(c ?? "")));
+    const cr = r.findIndex((c) => /credit/i.test(String(c ?? "")));
+    if (a >= 0 && (d >= 0 || cr >= 0)) {
+      headerIdx = i;
+      accountCol = a;
+      debitCol = d;
+      creditCol = cr;
+      break;
+    }
+  }
+  if (headerIdx < 0) return [];
+
+  const accounts: TbAccount[] = [];
+  for (let i = headerIdx + 1; i < rows.length; i++) {
+    const r = rows[i];
+    const name = String(r[accountCol] ?? "").trim();
+    if (!name) continue;
+    if (/^(total|accrual|basis|\d{1,2}\/\d{1,2}\/\d{2,4})/i.test(name)) continue;
+    if (/^\d{1,2}:\d{2}\s*(am|pm)/i.test(name)) continue;
+    const debit = debitCol >= 0 ? parseNumber(r[debitCol]) ?? 0 : 0;
+    const credit = creditCol >= 0 ? parseNumber(r[creditCol]) ?? 0 : 0;
+    accounts.push({ code: leafCode(name), name, balance: round2(debit - credit) });
+  }
+  return accounts;
+}
+
+// ── Balance Sheet ────────────────────────────────────────────────────────────
+
+interface BsLine {
+  code: string | null;
+  name: string;
+  amount: number | null;
+  note: string | null;
+}
+
+interface BsParse {
+  lines: BsLine[];
+  /** note → parent account codes (from "Total for <code> …" rows, e.g. "2. Intercompany" → 1020). */
+  noteParents: Map<string, string[]>;
+}
+
+const NOTE_RE = /^\d{1,3}\.\s+\S/;
+const TOTAL_FOR_RE = /^total\s+for\s+(.+)$/i;
+
+/** Parse the Balance Sheet grid: find the amount column (the "Total" column) and
+ *  the Notes column, then read account rows (leading account code) plus
+ *  "Total for X" rows whose note maps a whole account group to a schedule. */
+function parseBalanceSheet(grid: string[][]): BsParse {
+  const rows = grid.filter((r) => (r ?? []).some((c) => String(c ?? "").trim() !== ""));
+  if (rows.length === 0) return { lines: [], noteParents: new Map() };
+
+  const colCount = Math.max(...rows.map((r) => r.length), 0);
+
+  // Notes column: header "Notes"/"Schedule"/… or values like "1. Cash".
+  let notesCol = -1;
+  for (let c = 0; c < colCount; c++) {
+    const values = rows.map((r) => String(r[c] ?? "").trim());
+    if (values.some((v) => NOTE_RE.test(v) || /^(notes?|schedule|reference|supporting)\b/i.test(v))) {
+      notesCol = c;
+      break;
+    }
   }
 
-  const out = schedules.map((s) => tieOutOne(s, trialBalance.rows, accountCol, tbBalance, tolerance));
+  // Account column: the first column with cells carrying a leading 4-digit code.
+  let accountCol = -1;
+  for (let c = 0; c < colCount; c++) {
+    if (c === notesCol) continue;
+    const hasCode = rows.some((r) => {
+      const v = String(r[c] ?? "").trim();
+      return /^\d{4}\b/.test(v);
+    });
+    if (hasCode) {
+      accountCol = c;
+      break;
+    }
+  }
 
-  const summary = {
-    tied: out.filter((r) => r.status === "tie").length,
-    variance: out.filter((r) => r.status === "variance").length,
-    unmatched: out.filter((r) => r.status === "unmatched").length,
-    unresolved: out.filter((r) => r.status === "unresolved").length,
+  // Amount column: the non-account, non-notes column with the most numbers.
+  let amountCol = -1;
+  let bestCount = 0;
+  for (let c = 0; c < colCount; c++) {
+    if (c === accountCol || c === notesCol) continue;
+    const n = rows.filter((r) => parseNumber(r[c]) !== null).length;
+    if (n > bestCount) {
+      bestCount = n;
+      amountCol = c;
+    }
+  }
+
+  const lines: BsLine[] = [];
+  const noteParents = new Map<string, string[]>();
+  for (const r of rows) {
+    const note = notesCol >= 0 ? String(r[notesCol] ?? "").trim() || null : null;
+
+    // "Total for <code> …" rows map a whole account group to a schedule note,
+    // independent of the account column (which may be empty on a sparse sheet).
+    const totalForCell = (r ?? []).find((c) => TOTAL_FOR_RE.test(String(c ?? "").trim()));
+    if (totalForCell) {
+      if (!note) continue;
+      const m = TOTAL_FOR_RE.exec(String(totalForCell).trim());
+      const parents = m ? accountCodes(m[1]) : [];
+      if (parents.length > 0) noteParents.set(note, parents);
+      continue;
+    }
+
+    const name = accountCol >= 0 ? String(r[accountCol] ?? "").trim() : "";
+    if (!name) continue;
+    if (/^total/i.test(name)) continue; // section totals are not tie-out lines
+    const code = leafCode(name);
+    if (!code) continue; // section headers / titles
+    const amount = amountCol >= 0 ? parseNumber(r[amountCol]) : null;
+    if (amount === null) continue; // section headers have no amount
+    lines.push({ code, name, amount, note });
+  }
+  return { lines, noteParents };
+}
+
+// ── Schedules ────────────────────────────────────────────────────────────────
+
+/** Leading integer of a schedule/sheet name ("4. AP Aging" → 4). */
+function leadingNumber(text: string): number | null {
+  const m = String(text ?? "").match(/(\d+)/);
+  return m ? parseInt(m[1], 10) : null;
+}
+
+// ── Engine ───────────────────────────────────────────────────────────────────
+
+export function tieOut(opts: {
+  trialBalance: TieOutSheet;
+  balanceSheet: TieOutSheet | null;
+  tolerance?: number;
+}): TieOutResult {
+  const tolerance = opts.tolerance ?? 0;
+  const tb = parseTrialBalance(opts.trialBalance.grid);
+  const bs = opts.balanceSheet ? parseBalanceSheet(opts.balanceSheet.grid) : { lines: [], noteParents: new Map<string, string[]>() };
+
+  const tbByCode = new Map<string, TbAccount>();
+  for (const a of tb) if (a.code) tbByCode.set(a.code, a);
+  const bsByCode = new Map<string, BsLine>();
+  for (const l of bs.lines) if (l.code) bsByCode.set(l.code, l);
+
+  // ── Account-level tie (Balance Sheet ↔ Trial Balance) ────────────────────
+  // Scope to the balance-sheet accounts (the TB also holds P&L accounts, which
+  // are a different tie-out and correctly absent from the balance sheet).
+  const accounts: TieOutAccount[] = [];
+  for (const code of [...bsByCode.keys()].sort((a, b) => a.localeCompare(b))) {
+    const t = tbByCode.get(code);
+    const b = bsByCode.get(code)!;
+    const tbBalance = t ? t.balance : null;
+    const bsAmount = b.amount !== null ? round2(b.amount) : null;
+    let status: AccountStatus;
+    let variance: number | null = null;
+    if (tbBalance === null) status = "missing_tb";
+    else {
+      // Statements show liabilities/equity as positive magnitudes while the trial
+      // balance carries a debit/credit sign, so compare magnitudes.
+      variance = round2(Math.abs(bsAmount ?? 0) - Math.abs(tbBalance));
+      status = Math.abs(variance) > tolerance ? "variance" : "tie";
+    }
+    accounts.push({
+      code,
+      name: t?.name ?? b?.name ?? code,
+      bs_amount: bsAmount,
+      tb_balance: tbBalance,
+      variance,
+      status,
+    });
+  }
+
+  // ── Schedule-level tie ────────────────────────────────────────────────────
+  // The Balance Sheet Notes column is the schedule→accounts map: a note on an
+  // account row maps that account; a note on a "Total for <code>" row maps every
+  // trial-balance account carrying that parent code (the "1020 Intercompany"
+  // group → leaves 1021…1041). The schedules are the distinct Notes values —
+  // discovered from the balance sheet, not from the schedule sheets.
+  const scheduleCodes = new Map<string, Set<string>>();
+  for (const l of bs.lines) {
+    if (!l.note || !l.code) continue;
+    const set = scheduleCodes.get(l.note) ?? new Set<string>();
+    set.add(l.code);
+    scheduleCodes.set(l.note, set);
+  }
+  for (const [note, parents] of bs.noteParents) {
+    const set = scheduleCodes.get(note) ?? new Set<string>();
+    for (const a of tb) {
+      if (a.code && parents.some((p) => accountCodes(a.name).includes(p))) set.add(a.code);
+    }
+    if (set.size > 0) scheduleCodes.set(note, set);
+  }
+
+  const noteOrder = [...scheduleCodes.keys()].sort((a, b) => {
+    const na = leadingNumber(a) ?? 0;
+    const nb = leadingNumber(b) ?? 0;
+    return na - nb || a.localeCompare(b);
+  });
+
+  const schedules: ScheduleTieOut[] = [];
+  for (const note of noteOrder) {
+    const codes = new Set<string>(scheduleCodes.get(note) ?? []);
+
+    // The balance sheet already summarizes each schedule, so the schedule total is
+    // the sum of its accounts' balance-sheet amounts (the schedule sheet's own
+    // total is layout-dependent — net reconciliations, pivot tables — and is not
+    // read). This is the gross schedule total the trial balance must tie to.
+    const tbBalanceSum = [...codes].reduce((sum, c) => sum + (tbByCode.get(c)?.balance ?? 0), 0);
+    const bsAmountSum = [...codes].reduce((sum, c) => sum + (bsByCode.get(c)?.amount ?? 0), 0);
+    const bsCovered = [...codes].some((c) => bsByCode.get(c)?.amount != null);
+    if (!bsCovered) {
+      schedules.push({
+        schedule: note,
+        account_codes: [...codes].sort(),
+        schedule_total: null,
+        tb_balance: round2(tbBalanceSum),
+        variance: null,
+        status: "unresolved",
+        basis: "accounts mapped but no balance-sheet line total",
+      });
+      continue;
+    }
+
+    const variance = round2(Math.abs(bsAmountSum) - Math.abs(tbBalanceSum));
+    const status: ScheduleStatus = Math.abs(variance) > tolerance ? "variance" : "tie";
+    schedules.push({
+      schedule: note,
+      account_codes: [...codes].sort(),
+      schedule_total: round2(bsAmountSum),
+      tb_balance: round2(tbBalanceSum),
+      variance,
+      status,
+      basis: "schedule total from balance-sheet line",
+    });
+  }
+
+  const sum = (arr: TieOutAccount[], status: AccountStatus) => arr.filter((a) => a.status === status).length;
+  return {
+    trial_balance: opts.trialBalance.name,
+    balance_sheet: opts.balanceSheet?.name ?? null,
+    tolerance,
+    accounts,
+    schedules,
+    summary: {
+      accounts: {
+        tied: sum(accounts, "tie"),
+        variance: sum(accounts, "variance"),
+        missing_bs: 0,
+        missing_tb: sum(accounts, "missing_tb"),
+      },
+      schedules: {
+        tied: schedules.filter((s) => s.status === "tie").length,
+        variance: schedules.filter((s) => s.status === "variance").length,
+        unmatched: schedules.filter((s) => s.status === "unmatched").length,
+        unresolved: schedules.filter((s) => s.status === "unresolved").length,
+      },
+    },
   };
-
-  return { trial_balance: trialBalance.name, account_column: accountCol, schedules: out, summary };
 }
